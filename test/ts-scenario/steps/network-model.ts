@@ -15,7 +15,7 @@ import * as path from 'path';
 
 const stateStore: StateStore = StateStore.getInstance();
 
-Given(/^I have a (.+?) backed gateway named (.+?) with discovery set to (.+?) for user (.+?) using the connection profile named (.+?)$/, { timeout: Constants.STEP_MED as number }, async (walletType: string, gatewayName: string, useDiscovery: string, userName: string, ccpName: string) => {
+Given(/^I have a (.+?) backed gateway named (.+?) with discovery set to (.+?) for user (.+?) (?:in organization (.+?) )?using the connection profile named (.+?)$/, { timeout: Constants.STEP_MED as number }, async (walletType: string, gatewayName: string, useDiscovery: string, userName: string, orgName: string, ccpName: string) => {
 
 	const gateways: Map<string, any> = stateStore.get(Constants.GATEWAYS);
 	const fabricState: any = stateStore.get(Constants.FABRIC_STATE);
@@ -30,7 +30,7 @@ Given(/^I have a (.+?) backed gateway named (.+?) with discovery set to (.+?) fo
 			BaseUtils.logMsg(`Creating new Gateway named ${gatewayName}`);
 			const profilePath: string = path.join(__dirname, '../config', ccpName);
 			const ccp: CommonConnectionProfileHelper = new CommonConnectionProfileHelper(profilePath, true);
-			return await Gateway.createGateway(ccp, tls, userName, Constants.DEFAULT_ORG, gatewayName, JSON.parse(useDiscovery), walletType);
+			return await Gateway.createGateway(ccp, tls, userName, orgName || Constants.DEFAULT_ORG, gatewayName, JSON.parse(useDiscovery), walletType);
 		} catch (err) {
 			BaseUtils.logError(`Failed to create gateway named ${gatewayName}`, err);
 			return Promise.reject(err);
@@ -38,8 +38,16 @@ Given(/^I have a (.+?) backed gateway named (.+?) with discovery set to (.+?) fo
 	}
 });
 
+When(/^I use the discovery gateway named (.+?) to (.+?) a transaction with args (.+?) for contract (.+?) instantiated on channel (.+?) using requiredOrgs (.+?)$/, { timeout: Constants.STEP_MED as number }, async (gatewayName: string, txnType: string, txnArgs: string, ccName: string, channelName: string, requiredOrgs: string) => {
+	return await Gateway.performGatewayTransaction(gatewayName, ccName, channelName, '', txnArgs, txnType, '', JSON.parse(requiredOrgs));
+});
+
 When(/^I use the discovery gateway named (.+?) to (.+?) a transaction with args (.+?) for contract (.+?) instantiated on channel (.+?) using collection (.+?)$/, { timeout: Constants.STEP_MED as number }, async (gatewayName: string, txnType: string, txnArgs: string, ccName: string, channelName: string, collectionName: string) => {
 	return await Gateway.performGatewayTransaction(gatewayName, ccName, channelName, collectionName, txnArgs, txnType);
+});
+
+When(/^I use the discovery gateway named (.+?) to (.+?) a transaction a (.+?) times with args (.+?) for contract (.+?) instantiated on channel (.+?)$/, { timeout: Constants.STEP_MED as number }, async (gatewayName: string, txnType: string, txnCount: number, txnArgs: string, ccName: string, channelName: string) => {
+	return await Gateway.performGatewayTransaction(gatewayName, ccName, channelName, '', txnArgs, txnType, undefined, undefined, txnCount);
 });
 
 When(/^I use the gateway named (.+?) to (.+?) a transaction with args (.+?) for contract (.+?) instantiated on channel (.+?)$/, { timeout: Constants.STEP_MED as number }, async (gatewayName: string, txnType: string, txnArgs: string, ccName: string, channelName: string) => {

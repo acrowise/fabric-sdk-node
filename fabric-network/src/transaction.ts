@@ -41,8 +41,8 @@ function newEndorsementError(proposalResponse: ProposalResponse): Error {
 	const errorInfos: ErrorInfo[] = [];
 
 	for (const error of proposalResponse.errors) {
-		const errorInfo = {
-			peer: error.connection.name,
+		const errorInfo: ErrorInfo = {
+			peer: error?.connection?.name,
 			status: 'grpc',
 			message: error.message
 		};
@@ -51,7 +51,7 @@ function newEndorsementError(proposalResponse: ProposalResponse): Error {
 
 	for (const endorsement of proposalResponse.responses) {
 		const errorInfo = {
-			peer: endorsement.connection.name,
+			peer: endorsement?.connection?.name,
 			status: endorsement.response.status,
 			message: endorsement.response.message
 		};
@@ -256,7 +256,7 @@ export class Transaction {
 				accumulator.push(...value);
 				return accumulator;
 			};
-			proposalSendRequest.targets = this.endorsingOrgs.map(channel.getEndorsers).reduce(flatten, []);
+			proposalSendRequest.targets = this.endorsingOrgs.map((mspid) => channel.getEndorsers(mspid)).reduce(flatten, []);
 		} else {
 			logger.debug('%s - targets will default to all that are assigned to this channel', method);
 			proposalSendRequest.targets = channel.getEndorsers();
@@ -344,7 +344,7 @@ export class Transaction {
 
 		logger.debug('%s - handler will send', method);
 		const results = await this.queryHandler.evaluate(query);
-		logger.debug('%s - queryHandler completed %j', method, results);
+		logger.debug('%s - queryHandler completed', method);
 
 		return results;
 	}

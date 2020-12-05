@@ -39,6 +39,9 @@ class Proposal extends ServiceAction {
 
 		this.chaincodeId = chaincodeId;
 		this.channel = channel;
+
+		// to be used to build a discovery interest
+		this.noPrivateReads = false;
 		this.collectionsInterest = [];
 		this.chaincodesCollectionsInterest = [];
 	}
@@ -59,17 +62,25 @@ class Proposal extends ServiceAction {
 	}
 
 	/**
-	 * Returns a JSON object representing this proposals chaincodes
-	 * and collections as an interest for the Discovery Service.
-	 * The {@link Discovery} will use the interest to build a query
+	 * Returns a JSON object representing this proposal's chaincodes,
+	 * collections and the no private reads as an "interest" for the
+	 * Discovery Service.
+	 * The {@link Discovery} will use an interest to build a query
 	 * request for an endorsement plan to a Peer's Discovery service.
 	 * Use the {@link Proposal#addCollectionInterest} to add collections
 	 * for the chaincode of this proposal.
+	 * Use the {@link Proposal#setNoPrivateReads} to set this "no private reads"
+	 * setting for this proposal's chaincode. The default will be false
+	 * when not set.
 	 * Use the {@link Proposal#addChaincodeCollectionInterest} to add
 	 * chaincodes and collections that this chaincode code will call.
 	 * @example
 	 *    [
 	 *      { name: "mychaincode", collectionNames: ["mycollection"] }
+	 *    ]
+	 * @example
+	 *    [
+	 *      { name: "mychaincode", collectionNames: ["mycollection"], noPrivateReads: true }
 	 *    ]
 	 */
 	buildProposalInterest() {
@@ -83,6 +94,7 @@ class Proposal extends ServiceAction {
 		if (this.collectionsInterest.length > 0) {
 			chaincode.collectionNames = this.collectionsInterest;
 		}
+		chaincode.noPrivateReads = this.noPrivateReads;
 		if (this.chaincodesCollectionsInterest.length > 0) {
 			interest = interest.concat(this.chaincodesCollectionsInterest);
 		}
@@ -109,18 +121,37 @@ class Proposal extends ServiceAction {
 	}
 
 	/**
-	 * Use this method to add a chaincode name and collection names
-	 * that this proposal's chaincode will call. These will be used
-	 * to build a Discovery interest. {@link Proposal#buildProposalInterest}
+	 * Use this method to set the "no private reads" of the discovery hint
+	 * (interest) for the chaincode of this proposal.
+	 * @param {boolean} noPrivateReads Indicates we do not need to read from private data
+	 */
+	setNoPrivateReads(noPrivateReads) {
+		const method = `setNoPrivateReads[${this.chaincodeId}]`;
+		logger.debug('%s - start', method);
+
+		if (typeof noPrivateReads === 'boolean') {
+			this.noPrivateReads = noPrivateReads;
+		} else {
+			throw Error(`The "no private reads" setting must be boolean. :: ${noPrivateReads}`);
+		}
+	}
+
+	/**
+	 * Use this method to add a chaincode name and the collection names
+	 * that this proposal's chaincode will call along with the no private read
+	 * setting. These will be used to build a Discovery interest when this proposal
+	 * is used with the Discovery Service.
 	 * @param {string} chaincodeId - chaincode name
+	 * @param {boolean} noPrivateReads Indicates we do not need to read from private data
 	 * @param  {...string} collectionNames - one or more collection names
 	 */
-	addChaincodeCollectionsInterest(chaincodeId, ...collectionNames) {
+	addChaincodeNoPrivateReadsCollectionsInterest(chaincodeId, noPrivateReads, ...collectionNames) {
 		const method = `addChaincodeCollectionsInterest[${this.chaincodeId}]`;
 		logger.debug('%s - start', method);
 		if (typeof chaincodeId === 'string') {
 			const added_chaincode = {};
 			added_chaincode.name = chaincodeId;
+			added_chaincode.noPrivateReads = noPrivateReads ? true : false;
 			if (collectionNames && collectionNames.length > 0) {
 				added_chaincode.collectionNames = collectionNames;
 			}
@@ -130,6 +161,21 @@ class Proposal extends ServiceAction {
 		}
 
 		return this;
+	}
+
+	/**
+	 * Use this method to add a chaincode name and collection names
+	 * that this proposal's chaincode will call. These will be used
+	 * to build a Discovery interest when this proposal is used with
+	 * the Discovery Service.
+	 * @param {string} chaincodeId - chaincode name
+	 * @param  {...string} collectionNames - one or more collection names
+	 */
+	addChaincodeCollectionsInterest(chaincodeId, ...collectionNames) {
+		const method = `addChaincodeCollectionsInterest[${this.chaincodeId}]`;
+		logger.debug('%s - start', method);
+
+		return this.addChaincodeNoPrivateReadsCollectionsInterest(chaincodeId, false, ...collectionNames);
 	}
 
 	/**
@@ -196,7 +242,7 @@ class Proposal extends ServiceAction {
 		}
 
 		for (let i = 0; i < args.length; i++) {
-			logger.debug('%s - adding arg %s', method, args[i]);
+			logger.debug('%s - adding arg ==>%s<==', method, args[i]);
 			let arg;
 			if (args[i] instanceof Buffer) {
 				arg = args[i];
@@ -350,6 +396,7 @@ message Endorsement {
 		const {handler, targets, requestTimeout} = request;
 		logger.debug('%s - requestTimeout %s', method, requestTimeout);
 		const signedEnvelope = this.getSignedProposal();
+
 		this._proposalResponses = [];
 		this._proposalErrors = [];
 		this._queryResults = [];
@@ -375,18 +422,24 @@ message Endorsement {
 		} else if (targets) {
 			logger.debug('%s - have targets', method);
 			const peers = this.channel.getTargetEndorsers(targets);
-			const promises = peers.map(async (peer) => {
-				return peer.sendProposal(signedEnvelope, requestTimeout);
-			});
+			const promises = [];
+			for (const peer of peers) {
+				if (peer.hasChaincode(this.chaincodeId)) {
+					promises.push(peer.sendProposal(signedEnvelope, requestTimeout));
+				} else {
+					const chaincodeError = new Error(`Peer ${peer.name} is not running chaincode ${this.chaincodeId}`);
+					peer.getCharacteristics(chaincodeError);
+					promises.push(Promise.reject(chaincodeError));
+				}
+			}
 
 			logger.debug('%s - about to send to all peers', method);
 			const results = await settle(promises);
-			logger.debug('%s - have results from peers', method);
 			results.forEach((result) => {
 				if (result.isFulfilled()) {
 					const response = result.value();
 					if (response && response.response && response.response.status) {
-						logger.debug('%s - Promise is fulfilled: %s', method, response.response.status);
+						logger.debug('%s - Promise is fulfilled: status:%s message:%s', method, response.response.status, response.response.message);
 						this._proposalResponses.push(response);
 					} else if (response instanceof Error) {
 						logger.debug('%s - Promise response is an error: %s', method, response);
@@ -513,65 +566,12 @@ message Endorsement {
 	}
 
 	/**
-	 * Utility method to examine a set of proposals to check they contain
-	 * the same endorsement result write sets.
-	 * This will validate that the endorsing peers all agree on the result
-	 * of the chaincode execution.
-	 *
-	 * @param {ProposalResponse[]} proposalResponses - The proposal responses
-	 * from all endorsing peers
-	 * @returns {boolean} True when all proposals compare equally, false otherwise.
-	 */
-	compareProposalResponseResults(proposalResponses = checkParameter('proposalResponses')) {
-		const method = `compareProposalResponseResults[${this.chaincodeId}]`;
-		logger.debug('%s - start', method);
-
-		if (!Array.isArray(proposalResponses)) {
-			throw new Error('proposalResponses must be an array, typeof=' + typeof proposalResponses);
-		}
-		if (proposalResponses.length === 0) {
-			throw new Error('proposalResponses is empty');
-		}
-
-		if (proposalResponses.some((response) => response instanceof Error)) {
-
-			return false;
-		}
-
-		const first_one = _getProposalResponseResults(proposalResponses[0]);
-		for (let i = 1; i < proposalResponses.length; i++) {
-			const next_one = _getProposalResponseResults(proposalResponses[i]);
-			if (next_one.equals(first_one)) {
-				logger.debug('%s - read/writes result sets match index=%s', method, i);
-			} else {
-				logger.error('%s - read/writes result sets do not match index=%s', method, i);
-
-				return false;
-			}
-		}
-
-		return true;
-	}
-
-	/**
 	 * return a printable representation of this object
 	 */
 	toString() {
 
 		return `Proposal: {chaincodeId: ${this.chaincodeId}, channel: ${this.channel.name}}`;
 	}
-}
-
-// internal utility method to decode and get the write set
-// from a proposal response
-function _getProposalResponseResults(proposaResponse = checkParameter('proposalResponse')) {
-	if (!proposaResponse.payload) {
-		throw new Error('Parameter must be a ProposalResponse Object');
-	}
-	const payload = fabproto6.protos.ProposalResponsePayload.decode(proposaResponse.payload);
-	const extension = fabproto6.protos.ChaincodeAction.decode(payload.extension);
-
-	return extension.results;
 }
 
 module.exports = Proposal;

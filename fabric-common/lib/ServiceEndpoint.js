@@ -26,6 +26,7 @@ class ServiceEndpoint {
 		this.service = null;
 		this.serviceClass = null;
 		this.type = TYPE; // will be overridden by subclass
+		this.options = {};
 	}
 
 	/**
@@ -55,10 +56,8 @@ class ServiceEndpoint {
 	}
 
 	/**
-	 * Check that this ServiceEndpoint is not connected and has been assigned
-	 * an endpoint so that it could be connected. If a previous attempt
-	 * to conntect has been tried unsuccessfully it will be considered
-	 * not to be connectable.
+	 * Check that this ServiceEndpoint could be connected, even if it has
+	 * failed a previous attempt.
 	 */
 	isConnectable() {
 		const method = `isConnectable[${this.type}-${this.name}]`;
@@ -67,8 +66,8 @@ class ServiceEndpoint {
 		let result = false;
 		if (this.connected) {
 			logger.debug(`${method} - this servive endpoint has been connected`);
-			result = false;
-		} else if (this.endpoint && !this.connectAttempted) {
+			result = true;
+		} else if (this.endpoint && this.serviceClass) {
 			logger.debug(`${method} - this service endpoint has been assigned an endpoint, connect may be run`);
 			result = true;
 		}
@@ -143,22 +142,50 @@ class ServiceEndpoint {
 
 	/**
 	 * Check the connection status
+	 * @param {boolean} [reset] - Optional, attempt to reconnect if endpoint is not connected
 	 */
-	async checkConnection() {
-		const method = `checkConnection[${this.name}]`;
+	async checkConnection(reset = true) {
+		const method = `checkConnection[${this.type}-${this.name}]`;
 		logger.debug('%s - start - connected:%s', method, this.connected);
 
-		if (this.connected) {
+		if (reset && this.connected) {
 			try {
 				await this.waitForReady();
 			} catch (error) {
-				logger.error(`Peer ${this.endpoint.url} Connection failed :: ${error}`);
-				return false;
+				logger.error(`ServiceEndpoint ${this.endpoint.url} connection failed :: ${error}`);
+			}
+		}
+
+		if (reset && !this.connected && this.isConnectable()) {
+			try {
+				await this.resetConnection();
+			} catch (error) {
+				logger.error(`ServiceEndpoint ${this.endpoint.url} reset connection failed :: ${error}`);
 			}
 		}
 
 		logger.debug('%s - end - connected:%s', method, this.connected);
 		return this.connected;
+	}
+
+	/**
+	 * Reset the connection
+	 */
+	async resetConnection() {
+		const method = `resetConnection[${this.type}-${this.name}]`;
+		logger.debug('%s - start - connected:%s', method, this.connected);
+
+		this.disconnect(); // clean up possible old service
+		this.connectAttempted = true;
+		logger.debug(`${method} - create the grpc service for ${this.name}`);
+		if (this.endpoint && this.serviceClass) {
+			this.service = new this.serviceClass(this.endpoint.addr, this.endpoint.creds, this.options);
+			await this.waitForReady(this.service);
+		} else {
+			throw Error(`ServiceEndpoint ${this.name} is missing endpoint information`);
+		}
+
+		logger.debug('%s - end - connected:%s', method, this.connected);
 	}
 
 	waitForReady() {
@@ -167,7 +194,6 @@ class ServiceEndpoint {
 
 		return new Promise((resolve, reject) => {
 			logger.debug(`${method} - promise running ${this.name} - ${this.endpoint.url}`);
-			this.connected = false;
 			const wait_ready_timeout = this.options['grpc-wait-for-ready-timeout'];
 			const timeout = new Date().getTime() + wait_ready_timeout;
 			if (!this.service) {
@@ -179,6 +205,7 @@ class ServiceEndpoint {
 						err.message = err.message + ' on ' + this.toString();
 					}
 					err.connectFailed = true;
+					this.connected = false;
 					logger.error(err);
 					logger.error(`${method} - Failed to connect to remote gRPC server ${this.name} url:${this.endpoint.url} timeout:${wait_ready_timeout}`);
 					reject(err);
@@ -195,17 +222,20 @@ class ServiceEndpoint {
 	 * Get this remote endpoints characteristics
 	 */
 	getCharacteristics(results) {
-		results.connection = {};
-		results.connection.type = this.type;
-		results.connection.name = this.name;
-		results.connection.url = this.endpoint ? this.endpoint.url : '';
-		results.connection.options = this.endpoint ? this.endpoint.options : {};
+		results.connection = {
+			type: this.type,
+			name: this.name,
+			url: this.endpoint && this.endpoint.url || '',
+			options: this.endpoint && this.endpoint.options || {}
+		};
 		results.peer = this.name;
 
 		// remove private key
 		if (results.connection.options.clientKey) {
 			delete results.connection.options.clientKey;
 		}
+
+		return results;
 	}
 
 	/**

@@ -14,6 +14,7 @@ const DiscoveryHandler = require('./DiscoveryHandler.js');
 const logger = getLogger(TYPE);
 
 const fabproto6 = require('fabric-protos');
+const {SYSTEMCHAINCODES} = require('./Endorser.js');
 
 /**
  * The DiscoveryService class represents a peer in the target fabric network that
@@ -70,10 +71,10 @@ class DiscoveryService extends ServiceAction {
 		}
 
 		for (const discoverer of targets) {
-			if (discoverer.connected || discoverer.isConnectable()) {
-				logger.debug('%s - target is or could be connected %s', method, discoverer.name);
+			if (discoverer.isConnectable()) {
+				logger.debug('%s - target is connectable%s', method, discoverer.name);
 			} else {
-				throw Error(`Discoverer ${discoverer.name} is not connected`);
+				throw Error(`Discoverer ${discoverer.name} is not connectable`);
 			}
 		}
 		// must be all targets are connected
@@ -103,14 +104,18 @@ class DiscoveryService extends ServiceAction {
 	 *  sending to the peer.
 	 * @property {Endorsement} [endorsement] - Optional. Include the endorsement
 	 *  instance to build the discovery request based on the proposal.
-	 *  This will get the discovery interest (chaincode names and collections)
+	 *  This will get the discovery interest (chaincode names, collections and "no private reads")
 	 *  from the endorsement instance. Use the {@link Proposal#addCollectionInterest}
-	 *  to add collections to the endorsement's chaincode. Use the
-	 *  {@link Proposal#addChaincodeCollectionsInterest} to add chaincodes
-	 *  and collections that will be called by the endorsement's chaincode.
+	 *  to add collections to the endorsement's chaincode.
+	 *  Use the {@link Proposal#setNoPrivateReads} to set the proposals "no private reads"
+	 *  setting of the discovery interest.
+	 *  Use the {@link Proposal#addCollectionInterest} to add chaincodes,
+	 *  collections, and no private reads that will be used to get an endorsement plan
+	 *  from the peer's discovery service.
 	 * @property {DiscoveryChaincode} [interest] - Optional. An
-	 *  array of {@link DiscoveryChaincodeInterest} that have chaincodes
-	 *  and collections to calculate the endorsement plans.
+	 *  array of {@link DiscoveryChaincodeInterest} that have chaincodes, collections,
+	 *  and "no private reads" to help the peer's discovery service calculate the
+	 *  endorsement plan.
 	 * @example <caption>"single chaincode"</caption>
 	 *  [
 	 *     { name: "mychaincode"}
@@ -121,17 +126,21 @@ class DiscoveryService extends ServiceAction {
 	 *  ]
 	 * @example <caption>"single chaincode with a collection"</caption>
 	 *  [
-	 *     { name: "mychaincode", collection_names: ["mycollection"] }
+	 *     { name: "mychaincode", collectionNames: ["mycollection"] }
+	 *  ]
+	 * @example <caption>"single chaincode with a collection allowing no private data reads"</caption>
+	 *  [
+	 *     { name: "mychaincode", collectionNames: ["mycollection"], noPrivateReads: true }
 	 *  ]
 	 * @example <caption>"chaincode to chaincode with a collection"</caption>
 	 *  [
-	 *     { name: "mychaincode", collection_names: ["mycollection"] },
-	 *     { name: "myotherchaincode", collection_names: ["mycollection"] }}
+	 *     { name: "mychaincode", collectionNames: ["mycollection"] },
+	 *     { name: "myotherchaincode", collectionNames: ["mycollection"] }}
 	 *  ]
 	 * @example <caption>"chaincode to chaincode with collections"</caption>
 	 *  [
-	 *     { name: "mychaincode", collection_names: ["mycollection", "myothercollection"] },
-	 *     { name: "myotherchaincode", collection_names: ["mycollection", "myothercollection"] }}
+	 *     { name: "mychaincode", collectionNames: ["mycollection", "myothercollection"] },
+	 *     { name: "myotherchaincode", collectionNames: ["mycollection", "myothercollection"] }}
 	 *  ]
 	 */
 
@@ -144,7 +153,8 @@ class DiscoveryService extends ServiceAction {
 	/**
 	 * @typedef {Object} DiscoveryChaincodeCall
 	 * @property {string} name - The name of the chaincode
-	 * @property {string[]} [collection_names] - The names of the related collections
+	 * @property {string[]} [collectionNames] - The names of the related collections
+	 * @property {boolean} [noPrivateReads] - Indicates we do not need to read from private data
 	 */
 
 	/**
@@ -167,6 +177,28 @@ class DiscoveryService extends ServiceAction {
 			client_tls_cert_hash: this.client.getClientCertHash(),
 		});
 
+		let fullproposalInterest = null;
+
+		if (endorsement) {
+			fullproposalInterest = endorsement.buildProposalInterest();
+			logger.debug('%s - endorsement built interest: %j', method, fullproposalInterest);
+		} else if (interest) {
+			fullproposalInterest = interest;
+			logger.debug('%s - request interest: %j', method, fullproposalInterest);
+		}
+
+		// remove all legacy non endorsement policy system chaincodes
+		let proposalInterest = null;
+		if (fullproposalInterest) {
+			proposalInterest = [];
+			for (const fullinterest of fullproposalInterest) {
+				if (SYSTEMCHAINCODES.includes(fullinterest.name)) {
+					logger.debug('%s - not adding %s interest', method, fullinterest.name);
+				} else {
+					proposalInterest.push(fullinterest);
+				}
+			}
+		}
 
 		// be sure to add all entries to this array before setting into the grpc object
 		const queries = [];
@@ -195,17 +227,9 @@ class DiscoveryService extends ServiceAction {
 			queries.push(localQuery);
 		}
 
-		// add a chaincode query to get endorsement plans
-		if (endorsement || interest) {
+		// add a discovery chaincode query to get endorsement plans
+		if (proposalInterest && proposalInterest.length > 0) {
 			const interests = [];
-
-			let proposalInterest;
-			if (endorsement) {
-				proposalInterest = endorsement.buildProposalInterest();
-			} else {
-				proposalInterest = interest;
-			}
-
 			const chaincodeInterest = this._buildProtoChaincodeInterest(proposalInterest);
 			interests.push(chaincodeInterest);
 
@@ -217,8 +241,10 @@ class DiscoveryService extends ServiceAction {
 				channel: this.channel.name,
 				cc_query: ccQuery
 			});
-			logger.debug(`${method} - adding chaincodes/collections query`);
+			logger.debug('%s - adding chaincodes/collections query', method);
 			queries.push(query);
+		} else {
+			logger.debug('%s - NOT adding chaincodes/collections query', method);
 		}
 
 		if (queries.length === 0) {
@@ -234,6 +260,7 @@ class DiscoveryService extends ServiceAction {
 			this._action.request
 		).finish();
 
+		logger.debug('%s - end', method);
 		return this._payload;
 	}
 
@@ -285,9 +312,12 @@ class DiscoveryService extends ServiceAction {
 		for (const target of this.targets) {
 			logger.debug(`${method} - about to discover on ${target.endpoint.url}`);
 			try {
-				response = await target.sendDiscovery(signedEnvelope, this.requestTimeout);
-				this.currentTarget = target;
-				break;
+				const isConnected = await target.checkConnection();
+				if (isConnected) {
+					response = await target.sendDiscovery(signedEnvelope, this.requestTimeout);
+					this.currentTarget = target;
+					break;
+				}
 			} catch (error) {
 				response = error;
 			}
@@ -351,17 +381,39 @@ class DiscoveryService extends ServiceAction {
 	async getDiscoveryResults(refresh) {
 		const method = `getDiscoveryResults[${this.name}]`;
 		logger.debug(`${method} - start`);
-		if (!this.discoveryResults) {
+		if (!this.discoveryResults && !this.savedResults) {
 			throw Error('No discovery results found');
 		}
+		// when savedResults exist, then a refresh is running
+		if (this.savedResults) {
+			logger.debug(`${method} - using the saved results`);
+			return this.savedResults;
+		}
+
 		if (refresh && (new Date()).getTime() - this.discoveryResults.timestamp > this.refreshAge) {
+			logger.debug(`${method} - will refresh`);
+			this.savedResults = this.discoveryResults;
 			await this.send({asLocalhost: this.asLocalhost, requestTimeout: this.requestTimeout, targets: this.targets});
+			this.savedResults = null;
 		} else {
 			logger.debug(`${method} - not refreshing`);
 		}
 		return this.discoveryResults;
 	}
 
+	/**
+	 * Indicates if this discovery service has retreived results
+	 */
+	hasDiscoveryResults() {
+		const method = `hasDiscoveryResults[${this.name}]`;
+		logger.debug(`${method} - start`);
+
+		if (this.discoveryResults) {
+			return true;
+		}
+
+		return false;
+	}
 
 	/* internal method
 	 *  Takes an array of {@link DiscoveryChaincodeCall} that represent the
@@ -376,6 +428,9 @@ class DiscoveryService extends ServiceAction {
 			const chaincodeCall = fabproto6.discovery.ChaincodeCall.create();
 			if (typeof chaincode.name === 'string') {
 				chaincodeCall.name = chaincode.name;
+				if (chaincode.noPrivateReads) {
+					chaincodeCall.no_private_reads = chaincode.noPrivateReads;
+				}
 				// support both names
 				if (chaincode.collection_names) {
 					_getCollectionNames(chaincode.collection_names, chaincodeCall);
@@ -563,25 +618,19 @@ class DiscoveryService extends ServiceAction {
 		const method = `_buildOrderer[${this.name}]`;
 		logger.debug(`${method} - start mspid:${msp_id} endpoint:${host}:${port}`);
 
-		const address = `${host}:${port}`;
-		const found = this.channel.getCommitter(address);
-		if (found) {
-			logger.debug('%s - orderer is already added to the channel - %s', method, address);
-			return found.name;
-		}
-
+		const name = `${host}:${port}`;
 		const url = this._buildUrl(host, port);
 		logger.debug(`${method} - create a new orderer ${url}`);
-		const orderer = this.client.newCommitter(address, msp_id);
-		const end_point = this.client.newEndpoint(this._buildOptions(address, url, host, msp_id));
+		const orderer = this.client.newCommitter(name, msp_id);
+		const end_point = this.client.newEndpoint(this._buildOptions(name, url, host, msp_id));
 		try {
 			// first check to see if orderer is already on this channel
-			let same = false;
+			let same;
 			const channelOrderers = this.channel.getCommitters();
 			for (const channelOrderer of channelOrderers) {
 				logger.debug('%s - checking %s', method, channelOrderer);
 				if (channelOrderer.endpoint && channelOrderer.endpoint.url === url) {
-					same = true;
+					same = channelOrderer;
 					break;
 				}
 			}
@@ -589,13 +638,14 @@ class DiscoveryService extends ServiceAction {
 				await orderer.connect(end_point);
 				this.channel.addCommitter(orderer);
 			} else {
-				logger.debug('%s - %s - already added to this channel', method, orderer);
+				await same.checkConnection();
+				logger.debug('%s - orderer already added to this channel', method);
 			}
 		} catch (error) {
-			logger.error(`${method} - Unable to connect to the discovered orderer ${address} due to ${error}`);
+			logger.error(`${method} - Unable to connect to the discovered orderer ${name} due to ${error}`);
 		}
 
-		return address;
+		return name;
 	}
 
 	async _buildPeer(discovery_peer) {
@@ -608,40 +658,49 @@ class DiscoveryService extends ServiceAction {
 		const address = discovery_peer.endpoint;
 		const msp_id = discovery_peer.mspid;
 
-		const found = this.channel.getEndorser(address); // address is used as name
-		if (found) {
-			logger.debug(`${method} - endorser is already added to the channel - ${address}`);
-			return found;
-		}
-		logger.debug(`${method} - did not find endorser ${address}`);
 		const host_port = address.split(':');
 		const url = this._buildUrl(host_port[0], host_port[1]);
-		logger.debug(`${method} - create a new endorser ${url}`);
-		const peer = this.client.newEndorser(address, msp_id);
-		const end_point = this.client.newEndpoint(this._buildOptions(address, url, host_port[0], msp_id));
-		try {
-			// first check to see if peer is already on this channel
-			let same = false;
-			const channelPeers = this.channel.getEndorsers();
-			for (const channelPeer of channelPeers) {
-				logger.debug('%s - checking %s', method, channelPeer);
-				if (channelPeer.endpoint && channelPeer.endpoint.url === url) {
-					same = true;
-					break;
-				}
+
+		// first check to see if peer is already on this channel
+		let peer;
+		const channelPeers = this.channel.getEndorsers();
+		for (const channelPeer of channelPeers) {
+			logger.debug('%s - checking channel peer %s', method, channelPeer.name);
+			if (channelPeer.endpoint && channelPeer.endpoint.url === url) {
+				logger.debug('%s - url: %s - already added to this channel', method, url);
+				peer = channelPeer;
+				break;
 			}
-			if (!same) {
+		}
+		if (!peer) {
+			logger.debug(`${method} - create a new endorser ${url}`);
+			peer = this.client.newEndorser(address, msp_id);
+			const end_point = this.client.newEndpoint(this._buildOptions(address, url, host_port[0], msp_id));
+			try {
 				logger.debug(`${method} - about to connect to endorser ${address} url:${url}`);
 				await peer.connect(end_point);
 				this.channel.addEndorser(peer);
 				logger.debug(`${method} - connected to peer ${address} url:${url}`);
-			} else {
-				logger.debug('%s - %s - already added to this channel', method, peer);
+			} catch (error) {
+				logger.error(`${method} - Unable to connect to the discovered peer ${address} due to ${error}`);
 			}
-		} catch (error) {
-			logger.error(`${method} - Unable to connect to the discovered peer ${address} due to ${error}`);
+		} else {
+			// make sure the existing connect is still good
+			await peer.checkConnection();
 		}
 
+		// indicate that this peer has been touched by the discovery service
+		peer.discovered = true;
+
+		// make sure that this peer has all the found installed chaincodes
+		if (discovery_peer.chaincodes) {
+			for (const chaincode of discovery_peer.chaincodes) {
+				logger.debug(`${method} - adding chaincode ${chaincode.name} to peer ${peer.name}`);
+				peer.addChaincode(chaincode.name);
+			}
+		}
+
+		logger.debug(`${method} - end`);
 		return peer;
 	}
 
@@ -738,7 +797,7 @@ class DiscoveryService extends ServiceAction {
 	}
 }
 
-function _getCollectionNames(names, chaincode_call) {
+function _getCollectionNames(names, chaincodeCall) {
 	if (Array.isArray(names)) {
 		const collection_names = [];
 		names.map(name => {
@@ -748,7 +807,9 @@ function _getCollectionNames(names, chaincode_call) {
 				throw Error('The collection name must be a string');
 			}
 		});
-		chaincode_call.collection_names = collection_names;
+		// this collection_names must be in snake case as it will
+		// be used by the gRPC create message
+		chaincodeCall.collection_names = collection_names;
 	} else {
 		throw Error('Collection names must be an array of strings');
 	}

@@ -16,6 +16,7 @@ import { checkpointBlockListener } from './impl/event/listeners';
 import { addListener, ListenerSession, removeListener } from './impl/event/listenersession';
 import { SharedBlockListenerSession } from './impl/event/sharedblocklistenersession';
 import { QueryHandler } from './impl/query/queryhandler';
+import { notNullish } from './impl/gatewayutils';
 import * as Logger from './logger';
 
 const logger = Logger.getLogger('Network');
@@ -324,7 +325,7 @@ export class NetworkImpl implements Network {
 			const discoverers = [];
 			for (const peer of targets) {
 				const discoverer = this.channel.client.newDiscoverer(peer.name, peer.mspid);
-				await discoverer.connect(peer.endpoint);
+				discoverer.setEndpoint(peer.endpoint);
 				discoverers.push(discoverer);
 			}
 			this.discoveryService = this.channel.newDiscoveryService(this.channel.name);
@@ -355,7 +356,7 @@ export class NetworkImpl implements Network {
 			listener = checkpointBlockListener(listener, options.checkpointer);
 		}
 
-		if (options.startBlock) {
+		if (notNullish(options.startBlock)) {
 			return this.newIsolatedBlockListenerSession(listener, options);
 		} else {
 			return this.newSharedBlockListenerSession(listener, options.type);

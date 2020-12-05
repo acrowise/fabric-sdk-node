@@ -5,7 +5,7 @@
 'use strict';
 
 import * as FabricCAClient from 'fabric-ca-client';
-import { Contract, DefaultEventHandlerStrategies, DefaultQueryHandlerStrategies, Gateway, GatewayOptions, HsmOptions, HsmX509Provider, Identity, IdentityProvider, Network, QueryHandlerFactory, Transaction, TransientMap, TxEventHandlerFactory, Wallet, Wallets } from 'fabric-network';
+import { Contract, DefaultEventHandlerStrategies, DefaultQueryHandlerStrategies, Gateway, GatewayOptions, HsmOptions, HsmX509Provider, Identity, IdentityProvider, Network, QueryHandlerFactory, Transaction, TransientMap, TxEventHandlerFactory, Wallet, Wallets, DiscoveryInterest } from 'fabric-network';
 import * as fs from 'fs';
 import * as path from 'path';
 import { createQueryHandler as sampleQueryStrategy } from '../../config/handlers/sample-query-handler';
@@ -315,7 +315,8 @@ async function createHSMUser(wallet: Wallet, ccp: CommonConnectionProfileHelper,
 	const identityName: string = `${userName}@${orgName}`;
 	const identity = {
 		credentials: {
-			certificate: enrollment.certificate
+			certificate: enrollment.certificate,
+			privateKey: enrollment.key.toBytes()
 		},
 		mspId: orgMsp,
 		type: HSM_PROVIDER
@@ -333,12 +334,13 @@ async function createHSMUser(wallet: Wallet, ccp: CommonConnectionProfileHelper,
  * @param {String} txnType the type of transaction (submit/evaluate)
  * @param {String} handlerOption Optional: the handler option to use
  */
-export async function performGatewayTransaction(gatewayName: string, contractName: string, channelName: string, collectionName: string, args: string, txnType: string, handlerOption?: string): Promise<void> {
+export async function performGatewayTransaction(gatewayName: string, contractName: string, channelName: string, collectionName: string, args: string, txnType: string, handlerOption?: string, requiredOrgs?: string[], txnCount?: number): Promise<void> {
 
 	const gatewayObj = getGatewayObject(gatewayName);
 	const gateway = gatewayObj.gateway;
 
 	const submit: boolean = isSubmit(txnType);
+	const count: number = txnCount ? txnCount : 1;
 
 	// If a commit event handler was specified
 	if (handlerOption) {
@@ -382,7 +384,7 @@ export async function performGatewayTransaction(gatewayName: string, contractNam
 		BaseUtils.logMsg(` -- adding a discovery interest colletion name to the contrace ${collectionName}`);
 		const chaincodeId = contract.chaincodeId;
 		contract.resetDiscoveryInterests();
-		contract.addDiscoveryInterest({name: chaincodeId, collectionNames: [collectionName]});
+		contract.addDiscoveryInterest({name: chaincodeId, collectionNames: [collectionName], noPrivateReads: false});
 	}
 
 	// Split args
@@ -393,12 +395,34 @@ export async function performGatewayTransaction(gatewayName: string, contractNam
 	// Submit/evaluate transaction
 	try {
 		const transaction: Transaction = contract.createTransaction(func);
-		let resultBuffer: Buffer;
-		if (submit) {
-			resultBuffer = await transaction.submit(...funcArgs);
-		} else {
-			resultBuffer = await transaction.evaluate(...funcArgs);
+		if (requiredOrgs) {
+			transaction.setEndorsingOrganizations(...requiredOrgs);
 		}
+
+		let resultBuffer: Buffer = Buffer.from('FAILED');
+		if (count > 1) {
+			const promises: Promise<any>[] = [];
+			for (let x = 0; x < count; x++) {
+				if (submit) {
+					promises.push(contract.submitTransaction(func, ...funcArgs));
+				} else {
+					promises.push(contract.evaluateTransaction(func, ...funcArgs));
+				}
+			}
+			const multiResults: any[] = await Promise.all(promises);
+			if (multiResults && multiResults.length > 0) {
+				for (const multiResult of multiResults) {
+					resultBuffer = multiResult;
+				}
+			}
+		} else {
+			if (submit) {
+				resultBuffer = await transaction.submit(...funcArgs);
+			} else {
+				resultBuffer = await transaction.evaluate(...funcArgs);
+			}
+		}
+
 		const result: string = resultBuffer.toString('utf8');
 		BaseUtils.logMsg(`Successfully performed ${txnType} transaction [${func}] with result [${result}]`);
 		gatewayObj.result = {type: txnType, response: result};

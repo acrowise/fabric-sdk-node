@@ -11,6 +11,7 @@ const BlockDecoderRewire = rewire('../lib/BlockDecoder');
 const should = require('chai').should();
 const sinon = require('sinon');
 
+const fabproto6 = require('fabric-protos');
 
 describe('BlockDecoder', () => {
 	let revert;
@@ -1030,6 +1031,28 @@ describe('BlockDecoder', () => {
 			const configValue = decodeConfigValue(protoConfigValue, 'ConsensusType');
 			configValue.value.type.should.deep.equal('Best');
 		});
+		it('should return an array of strings for Capabilities', () => {
+			const commonConfigurationProtoStub = sandbox.stub().returns({capabilities: ['V1_1']});
+			revert.push(BlockDecoderRewire.__set__('fabproto6.common.Capabilities.decode', commonConfigurationProtoStub));
+
+			const configValue = decodeConfigValue(protoConfigValue, 'Capabilities');
+			configValue.value.capabilities.should.deep.equal(['V1_1']);
+		});
+		it('should return an object with ACLs', () => {
+			const apiResourceFields = {
+				policy_ref: 'Writers'
+			};
+			const apiResource = fabproto6.protos.APIResource.create(apiResourceFields);
+			const aclsFields = {
+				acls: {writer: apiResource}
+			};
+			const aclsProto = fabproto6.protos.ACLs.create(aclsFields);
+			const aclsBuffer = fabproto6.protos.ACLs.encode(aclsProto).finish();
+			protoConfigValue.value = aclsBuffer;
+
+			const configValue = decodeConfigValue(protoConfigValue, 'ACLs');
+			configValue.value.acls.should.deep.equal(aclsFields.acls);
+		});
 	});
 
 	describe('#decodeConfigPolicies', () => {
@@ -2018,13 +2041,13 @@ describe('BlockDecoder', () => {
 				start_key: 'start_key',
 				end_key: 'end_key',
 				itr_exhausted: 'itr_exhausted',
-				raw_reads: ['raw_read']
+				raw_reads: {kv_reads: ['kv_read']}
 			};
 			const rangeQueryInfo = decodeRangeQueryInfo(mockProtoRangeQueryInfo);
 			rangeQueryInfo.start_key.should.equal('start_key');
 			rangeQueryInfo.end_key.should.equal('end_key');
 			rangeQueryInfo.itr_exhausted.should.equal('itr_exhausted');
-			sinon.assert.calledWith(decodeKVReadStub, 'raw_read');
+			sinon.assert.calledWith(decodeKVReadStub, 'kv_read');
 		});
 
 		it('should return the correct range query info with reads merklehashes', () => {

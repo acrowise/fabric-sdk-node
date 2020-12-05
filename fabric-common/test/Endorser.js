@@ -43,6 +43,71 @@ describe('Endorser', () => {
 		});
 	});
 
+	describe('#addChaincode', () => {
+		const defaultChaincodes = ['cscc', 'qscc', 'lscc', 'vscc', 'escc'];
+		it('should run without name', () => {
+			endorser.addChaincode();
+			endorser.chaincodes.should.be.deep.equal(defaultChaincodes);
+		});
+		it('should run with name', () => {
+			endorser.addChaincode('chaincode');
+			endorser.chaincodes.should.be.deep.equal(defaultChaincodes.concat(['chaincode']));
+		});
+		it('should run with same name', () => {
+			endorser.addChaincode('chaincode');
+			endorser.addChaincode('chaincode');
+			endorser.chaincodes.should.be.deep.equal(defaultChaincodes.concat(['chaincode']));
+		});
+		it('should run with different name', () => {
+			endorser.addChaincode('chaincode');
+			endorser.addChaincode('other');
+			endorser.chaincodes.should.be.deep.equal(defaultChaincodes.concat(['chaincode', 'other']));
+		});
+	});
+
+	describe('#hasChaincode', () => {
+		it('should be false without name and not discovered', () => {
+			const result = endorser.hasChaincode();
+			result.should.be.false;
+		});
+		it('should be false without name and discovered', () => {
+			endorser.discovered = true;
+			const result = endorser.hasChaincode();
+			result.should.be.false;
+		});
+		it('should be true with name and not discovered', () => {
+			const result = endorser.hasChaincode('chaincode');
+			result.should.be.true;
+		});
+		it('should be false with name and no chaincodes discovered', () => {
+			endorser.discovered = true;
+			const result = endorser.hasChaincode('chaincode');
+			result.should.be.false;
+		});
+		it('should be true with name and found and not discovered', () => {
+			endorser.chaincodes = ['chaincode'];
+			const result = endorser.hasChaincode('chaincode');
+			result.should.be.true;
+		});
+		it('should be true with name and found and discovered', () => {
+			endorser.discovered = true;
+			endorser.addChaincode('chaincode');
+			const result = endorser.hasChaincode('chaincode');
+			result.should.be.true;
+		});
+		it('should be true with name and found using "maybe" and not discovered', () => {
+			endorser.addChaincode('chaincode');
+			const result = endorser.hasChaincode('chaincode', false);
+			result.should.be.true;
+		});
+		it('should be true with name and found using "maybe" and discovered', () => {
+			endorser.discovered = true;
+			endorser.addChaincode('chaincode');
+			const result = endorser.hasChaincode('chaincode', false);
+			result.should.be.true;
+		});
+	});
+
 	describe('#sendProposal', () => {
 		it('should reject if no proposal', async () => {
 			await endorser.sendProposal().should.be.rejectedWith(/Missing signedProposal parameter/);

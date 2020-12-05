@@ -21,10 +21,28 @@ export class Utils {
 }
 export interface ICryptoKey {
 	getSKI(): string;
+	getHandle(): string;
 	isSymmetric(): boolean;
 	isPrivate(): boolean;
 	getPublicKey(): ICryptoKey;
 	toBytes(): string;
+}
+
+export class Pkcs11EcdsaKey implements ICryptoKey {
+	constructor(keyAttr: any, keySize: number);
+	getSKI(): string;
+	getHandle(): string;
+	isSymmetric(): boolean;
+	isPrivate(): boolean;
+	getPublicKey(): ICryptoKey;
+	toBytes(): string;
+}
+
+export interface EDSAKeyAttr {
+	ski?: Buffer;
+	ecpt?: Buffer;
+	pub?: Buffer;
+	priv?: Buffer;
 }
 
 export interface ICryptoKeyStore {
@@ -38,6 +56,7 @@ export interface ICryptoSuite {
 	deriveKey(key: ICryptoKey, opts?: KeyOpts): ICryptoKey;
 	encrypt(key: ICryptoKey, plainText: Buffer, opts: any): Buffer;
 	getKey(ski: string): Promise<ICryptoKey>;
+	getKeySize(): number;
 	generateKey(opts?: KeyOpts): Promise<ICryptoKey>;
 	hash(msg: string, opts: any): string;
 	importKey(pem: string, opts?: KeyOpts): ICryptoKey | Promise<ICryptoKey>;
@@ -148,8 +167,11 @@ export class Committer extends ServiceEndpoint {
 }
 
 export class Endorser extends ServiceEndpoint {
+	public discovered: boolean;
 	constructor(name: string, client: Client, mspid: string);
 	public sendProposal(signedProposal?: Buffer, timeout?: number): Promise<any>;
+	public addChaincode(chaincodeName: string): Endorser;
+	public hasChaincode(chaincodeName: string): boolean;
 }
 
 export class Eventer extends ServiceEndpoint {
@@ -209,11 +231,14 @@ export interface SendProposalRequest {
 }
 
 export class Proposal extends ServiceAction {
+	readonly chaincodeId: string;
 	constructor(chaincodeName: string, channel: Channel);
 	public getTransactionId(): string;
 	public buildProposalInterest(): any;
 	public addCollectionInterest(collectionName: string): Proposal;
+	public setNoPrivateReads(noPrivateReads: boolean): Proposal;
 	public addChaincodeCollectionsInterest(collectionName: string, collectionNames: string[]): Proposal;
+	public addChaincodeNoPrivateReadsCollectionsInterest(collectionName: string, noPrivateReads: boolean, collectionNames: string[]): Proposal;
 	public build(idContext: IdentityContext, request?: BuildProposalRequest): Buffer;
 	public send(request?: SendProposalRequest): Promise<ProposalResponse>;
 	public verifyProposalResponse(proposalResponse?: any): boolean;
@@ -228,6 +253,7 @@ export class DiscoveryService extends ServiceAction {
 	public send(request?: any): Promise<any>;
 	public getDiscoveryResults(refresh?: boolean): Promise<any>;
 	public close(): void;
+	public hasDiscoveryResults(): boolean;
 }
 export interface RegistrationOpts {
 	startBlock?: number|string|Long;
@@ -285,8 +311,9 @@ export class EventService extends ServiceAction {
 	public registerTransactionListener(txid: string, callback: EventCallback, options: EventRegistrationOptions): EventListener;
 	public registerChaincodeListener(chaincodeId: string, eventName: string, callback: EventCallback, options: EventRegistrationOptions): EventListener;
 	public registerBlockListener(callback: EventCallback, options: EventRegistrationOptions): EventListener;
-	setTargets(targets: Eventer[]): void;
-	isStarted(): boolean;
+	public setTargets(targets: Eventer[]): void;
+	public isStarted(): boolean;
+	public isInUse(): boolean;
 }
 
 export interface StartEventRequest {
@@ -422,7 +449,8 @@ export interface DiscoveryResultMSPConfig {
 	intermediateCerts: string;
 	admins: string;
 	id: string;
-	orgs: string[];
+	name: string;
+	organizationalUnitIdentifiers: string[];
 	tlsRootCerts: string;
 	tlsIntermediateCerts: string;
 }
@@ -461,7 +489,7 @@ export interface DiscoveryResultEndorsementLayout {
 
 export interface DiscoveryResultEndorsementPlan {
 	chaincode: string;
-	plan_id: string;
+	plan_id?: string;
 	groups: {
 		[groupName: string]: DiscoveryResultEndorsementGroup;
 	};
@@ -472,9 +500,9 @@ export interface DiscoveryResults {
 	msps?: { [mspid: string]: DiscoveryResultMSPConfig };
 	orderers?: { [mspid: string]: DiscoveryResultEndpoints };
 
-	peersByOrg?: { [name: string]: DiscoveryResultPeers };
+	peers_by_org?: { [name: string]: DiscoveryResultPeers };
 
-	endorsement_plans: DiscoveryResultEndorsementPlan[];
+	endorsement_plan?: DiscoveryResultEndorsementPlan;
 
 	timestamp: number;
 }

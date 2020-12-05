@@ -63,3 +63,21 @@ Feature: Configure Fabric using CLI and submit/evaluate using a network Gateway 
 		Then The gateway named myDiscoveryGateway has a submit type response matching {"key0":"value1","key1":"value2"}
 		When I modify myDiscoveryGateway to evaluate a transaction with transient data using args [getTransient,valueA,valueB] for contract fabcar instantiated on channel discoverychannel
 		Then The gateway named myDiscoveryGateway has a evaluate type response matching {"key0":"valueA","key1":"valueB"}
+
+	Scenario: Using a Gateway I can submit and evaluate transactions on instantiated node smart contract with specific organizations
+		When I use the discovery gateway named myDiscoveryGateway to submit a transaction with args [createCar,2001,Ford,F350,red,Sam] for contract fabcar instantiated on channel discoverychannel using requiredOrgs ["Org1MSP","Org2MSP"]
+		Then The gateway named myDiscoveryGateway has a submit type response
+		When I use the gateway named myDiscoveryGateway to evaluate a transaction with args [queryCar,2001] for contract fabcar instantiated on channel discoverychannel
+		Then The gateway named myDiscoveryGateway has a evaluate type response matching {"color":"red","docType":"car","make":"Ford","model":"F350","owner":"Sam"}
+
+	Scenario: Using a Gateway I can use transient data
+		When I use the discovery gateway named myDiscoveryGateway to submit a transaction a 100 times with args [createCar,2001,Ford,F350,red,Sam] for contract fabcar instantiated on channel discoverychannel
+		Then The gateway named myDiscoveryGateway has a submit type response
+
+	Scenario: Using a Gateway I can submit to system chaincodes
+		When I use the gateway named myDiscoveryGateway to submit a transaction with args [deploy] for contract lscc instantiated on channel discoverychannel
+		Then The gateway named myDiscoveryGateway has a error type response containing invalid number of arguments to lscc:
+
+	Scenario: Using a Gateway I can evaluate to system chaincodes
+		When I use the gateway named myDiscoveryGateway to evaluate a transaction with args [GetBlockByNumber,discoverychannel,0] for contract qscc instantiated on channel discoverychannel
+		Then The gateway named myDiscoveryGateway has a evaluate type response

@@ -12,7 +12,7 @@ The connection profile has specific addresses and settings of the network endpoi
 ### Loading connection profile configurations
 The application may build a Javascript object from a yaml or a json
 formatted file.
-The applicatioin will then pass this to the `Gateway.connect`
+The application will then pass this to the `Gateway.connect`
 which provides the network configuration.
 
 The following examples will create a new instance of the `Gateway` using a
@@ -280,6 +280,43 @@ peers:
       path: <path to file>
        or
       pem: <byte string>
+
+certificateAuthorities:
+  ca-org1:
+    url: https://localhost:7054
+    # the properties specified under this object are passed to the 'http' client verbatim when
+    # making the request to the Fabric-CA server
+    httpOptions:
+      verify: true
+    tlsCACerts:
+      # Comma-Separated list of paths
+      path: peerOrganizations/org1.example.com/ca/org1.example.com-cert.pem
+      # Client key and cert for TLS mutual auth with Fabric CA. If the target Fabric CA server
+      # does not have TLS mutual auth turned on, then this section is not needed
+      client:
+        keyfile: <path to file>
+        certfile: <byte string>
+
+
+    # Fabric-CA supports dynamic user enrollment via REST APIs. A "root" user, a.k.a registrar, is 
+    # needed to enroll and invoke new users.
+    registrar:
+       enrollId: admin
+       enrollSecret: adminpw
+    # [Optional] The optional name of the CA.
+    caName: caNameHere
+  ca-org2:
+    url: https://localhost:8054
+    httpOptions:
+      verify: true
+    tlsCACerts:
+      client:
+        keyfile: <path to file>
+        certfile: <byte string>
+    registrar:
+       enrollId: admin
+       enrollSecret: adminpw
+    caName: caNameHere
 ```
 
 

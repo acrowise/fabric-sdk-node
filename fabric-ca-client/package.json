@@ -5,7 +5,7 @@
     "hyperledger",
     "blockchain"
   ],
-  "version": "2.2.0",
+  "version": "2.3.0-snapshot",
   "main": "index.js",
   "scripts": {
     "test": "nyc mocha --recursive  -t 10000"
@@ -15,7 +15,7 @@
     "url": "https://github.com/hyperledger/fabric-sdk-node"
   },
   "engines": {
-    "node": "^10.15.3 || ^12.13.1",
+    "node": "^10.15.3 || ^12.13.1 || ^14.13.1",
     "npm": "^6.4.1"
   },
   "types": "./types/index.d.ts",

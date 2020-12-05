@@ -4,6 +4,15 @@
 # https://docs.microsoft.com/azure/devops/pipelines/languages/javascript
 
 # Pipeline-level keywords belong here
+
+schedules:
+  - cron: "0 0 * * *" # https://crontab.guru/#0_0_*_*_*
+    displayName: "Daily midnight build"
+    branches:
+      include:
+        - master
+    always: true
+
 trigger:
 - master
 
@@ -11,7 +20,7 @@ pr:
   - master
 
 pool:
-  vmImage: 'ubuntu-18.04'
+  vmImage: 'ubuntu-20.04'
 
 variables:
 - group: credentials
@@ -37,6 +46,8 @@ stages:
             versionSpec: '10.x'
           Node12:
             versionSpec: '12.x'
+          Node14:
+            versionSpec: '14.x'
       steps:
         - task: NodeTool@0
           inputs:

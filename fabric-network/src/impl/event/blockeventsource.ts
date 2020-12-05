@@ -14,11 +14,24 @@ import { newFilteredBlockEvent } from './filteredblockeventfactory';
 import { newFullBlockEvent } from './fullblockeventfactory';
 import { OrderedBlockQueue } from './orderedblockqueue';
 import { newPrivateBlockEvent } from './privateblockeventfactory';
+import { notNullish } from '../gatewayutils';
 import Long = require('long');
 
 const logger = Logger.getLogger('BlockEventSource');
 
 const defaultBlockType: EventType = 'filtered';
+
+function newBlockQueue(options: ListenerOptions): OrderedBlockQueue {
+	const startBlock = asLong(options.startBlock);
+	return new OrderedBlockQueue(startBlock);
+}
+
+function asLong(value?: string | number | Long): Long | undefined {
+	if (notNullish(value)) {
+		return Long.fromValue(value);
+	}
+	return undefined;
+}
 
 export class BlockEventSource {
 	private readonly eventServiceManager: EventServiceManager;
@@ -32,12 +45,13 @@ export class BlockEventSource {
 
 	constructor(eventServiceManager: EventServiceManager, options: ListenerOptions = {}) {
 		this.eventServiceManager = eventServiceManager;
-		this.blockQueue = this.newBlockQueue(options);
+		this.blockQueue = newBlockQueue(options);
 		this.asyncNotifier = new AsyncNotifier(
 			this.blockQueue.getNextBlock.bind(this.blockQueue),
 			this.notifyListeners.bind(this)
 		);
 		this.blockType = options.type || defaultBlockType;
+		logger.debug('constructor - blockType:%s', this.blockType);
 	}
 
 	async addBlockListener(listener: BlockListener): Promise<BlockListener> {
@@ -56,12 +70,9 @@ export class BlockEventSource {
 		this.started = false;
 	}
 
-	private newBlockQueue(options: ListenerOptions): OrderedBlockQueue {
-		const startBlock = options.startBlock ? Long.fromValue(options.startBlock) : undefined;
-		return new OrderedBlockQueue(startBlock);
-	}
-
 	private async start() {
+		logger.debug('start - started:%s', this.started);
+
 		if (this.started) {
 			return;
 		}
@@ -71,6 +82,8 @@ export class BlockEventSource {
 		try {
 			this.eventService = this.eventServiceManager.newDefaultEventService();
 			this.registerListener(); // Register before start so no events are missed
+			logger.debug('start - calling startEventService');
+
 			await this.startEventService();
 		} catch (error) {
 			logger.error('Failed to start event service', error);
@@ -96,10 +109,19 @@ export class BlockEventSource {
 	}
 
 	private async startEventService() {
+		let startBlock = this.getNextBlockNumber();
+		if (startBlock) {
+			startBlock = startBlock.subtract(Long.ONE);
+			if (startBlock.isNegative()) {
+				startBlock = Long.ZERO;
+			}
+		}
+
 		const options: StartRequestOptions = {
 			blockType: this.blockType,
-			startBlock: this.getNextBlockNumber()
+			startBlock
 		};
+
 		await this.eventServiceManager.startEventService(this.eventService!, options);
 	}
 

@@ -41,6 +41,8 @@ describe('Proposal', () => {
 		endorser.type = 'Endorser';
 		endpoint = client.newEndpoint({url: 'grpc://somehost.com'});
 		endorser.endpoint = endpoint;
+		endorser.waitForReady = sinon.stub().resolves(true);
+		endorser.checkConnection = sinon.stub().resolves(true);
 		handler = new DiscoveryHandler('discovery');
 	});
 
@@ -78,19 +80,39 @@ describe('Proposal', () => {
 	describe('#buildProposalInterest', () => {
 		it('should return interest', () => {
 			const interest = proposal.buildProposalInterest();
-			interest.should.deep.equal([{name: 'chaincode'}]);
+			interest.should.deep.equal([{name: 'chaincode', noPrivateReads: false}]);
 		});
 		it('should return interest and collections', () => {
 			const collections = ['col1', 'col2'];
 			proposal.collectionsInterest = collections;
 			const interest = proposal.buildProposalInterest();
-			interest.should.deep.equal([{name: 'chaincode', collectionNames: collections}]);
+			interest.should.deep.equal([{name: 'chaincode', noPrivateReads: false, collectionNames: collections}]);
+		});
+		it('should return interest and collections with noPrivateReads', () => {
+			const collections = ['col1', 'col2'];
+			proposal.collectionsInterest = collections;
+			proposal.noPrivateReads = true;
+			const interest = proposal.buildProposalInterest();
+			interest.should.deep.equal([{name: 'chaincode', noPrivateReads: true, collectionNames: collections}]);
 		});
 		it('should return interest and chaincode and chaincode collections ', () => {
 			const chaincode_collection = {name: 'chain2', collectionNames: ['col1', 'col2']};
 			proposal.chaincodesCollectionsInterest = [chaincode_collection];
 			const interest = proposal.buildProposalInterest();
-			interest.should.deep.equal([{name: 'chaincode'}, chaincode_collection]);
+			interest.should.deep.equal([{name: 'chaincode', noPrivateReads: false}, chaincode_collection]);
+		});
+		it('should return interest and chaincode and chaincode collections with no private reads ', () => {
+			const chaincode_collection = {name: 'chain2', collectionNames: ['col1', 'col2'], noPrivateReads: true};
+			proposal.chaincodesCollectionsInterest = [chaincode_collection];
+			const interest = proposal.buildProposalInterest();
+			interest.should.deep.equal([{name: 'chaincode', noPrivateReads: false}, chaincode_collection]);
+		});
+		it('should return interest and chaincode and chaincode collections with no private reads ', () => {
+			const chaincode_collection = {name: 'chain2', collectionNames: ['col1', 'col2'], noPrivateReads: true};
+			proposal.noPrivateReads = true;
+			proposal.chaincodesCollectionsInterest = [chaincode_collection];
+			const interest = proposal.buildProposalInterest();
+			interest.should.deep.equal([{name: 'chaincode', noPrivateReads: true}, chaincode_collection]);
 		});
 	});
 
@@ -105,7 +127,7 @@ describe('Proposal', () => {
 			proposal.addCollectionInterest('col2');
 			proposal.collectionsInterest.should.deep.equal(collections);
 			const interest = proposal.buildProposalInterest();
-			interest.should.deep.equal([{name: 'chaincode', collectionNames: collections}]);
+			interest.should.deep.equal([{name: 'chaincode', noPrivateReads: false, collectionNames: collections}]);
 		});
 		it('should require a string collection name', () => {
 			(() => {
@@ -114,24 +136,63 @@ describe('Proposal', () => {
 		});
 	});
 
+	describe('#setNoPrivateReads', () => {
+		it('should set no private reads', () => {
+			proposal.setNoPrivateReads(true);
+			proposal.noPrivateReads.should.equal(true);
+		});
+		it('should set no private reads false', () => {
+			proposal.setNoPrivateReads(false);
+			proposal.noPrivateReads.should.equal(false);
+		});
+
+		it('should require a boolean', () => {
+			(() => {
+				proposal.setNoPrivateReads({});
+			}).should.throw(/The "no private reads" setting must be boolean/);
+		});
+	});
+
 	describe('#addChaincodeCollectionsInterest', () => {
 		it('should save chaincode collection interest', () => {
-			const chaincode_collection = {name: 'chain2', collectionNames: ['col1', 'col2']};
+			const chaincode_collection = {name: 'chain2', noPrivateReads: false, collectionNames: ['col1', 'col2']};
 			proposal.addChaincodeCollectionsInterest('chain2', 'col1', 'col2');
 			proposal.chaincodesCollectionsInterest.should.deep.equal([chaincode_collection]);
 			const interest = proposal.buildProposalInterest();
-			interest.should.deep.equal([{name: 'chaincode'}, chaincode_collection]);
+			interest.should.deep.equal([{name: 'chaincode', noPrivateReads: false}, chaincode_collection]);
 		});
 		it('should save chaincode only chaincode collection interest', () => {
-			const chaincode_collection = {name: 'chain2'};
+			const chaincode_collection = {name: 'chain2', noPrivateReads: false};
 			proposal.addChaincodeCollectionsInterest('chain2');
 			proposal.chaincodesCollectionsInterest.should.deep.equal([chaincode_collection]);
 			const interest = proposal.buildProposalInterest();
-			interest.should.deep.equal([{name: 'chaincode'}, chaincode_collection]);
+			interest.should.deep.equal([{name: 'chaincode', noPrivateReads: false}, chaincode_collection]);
 		});
 		it('should require a string chaincode name', () => {
 			(() => {
 				proposal.addChaincodeCollectionsInterest({});
+			}).should.throw('Invalid chaincodeId parameter');
+		});
+	});
+
+	describe('#addChaincodeNoPrivateReadsCollectionsInterest', () => {
+		it('should save chaincode collection interest', () => {
+			const chaincode_collection = {name: 'chain2', noPrivateReads: true, collectionNames: ['col1', 'col2']};
+			proposal.addChaincodeNoPrivateReadsCollectionsInterest('chain2', true, 'col1', 'col2');
+			proposal.chaincodesCollectionsInterest.should.deep.equal([chaincode_collection]);
+			const interest = proposal.buildProposalInterest();
+			interest.should.deep.equal([{name: 'chaincode', noPrivateReads: false}, chaincode_collection]);
+		});
+		it('should save chaincode only chaincode collection interest', () => {
+			const chaincode_collection = {name: 'chain2', noPrivateReads: false};
+			proposal.addChaincodeNoPrivateReadsCollectionsInterest('chain2');
+			proposal.chaincodesCollectionsInterest.should.deep.equal([chaincode_collection]);
+			const interest = proposal.buildProposalInterest();
+			interest.should.deep.equal([{name: 'chaincode', noPrivateReads: false}, chaincode_collection]);
+		});
+		it('should require a string chaincode name', () => {
+			(() => {
+				proposal.addChaincodeNoPrivateReadsCollectionsInterest({});
 			}).should.throw('Invalid chaincodeId parameter');
 		});
 	});
@@ -205,6 +266,7 @@ describe('Proposal', () => {
 			proposal.build(idx);
 			proposal.sign(idx);
 			sinon.stub(endorser, 'sendProposal').resolves({response: {status: 200}});
+			proposal.compareProposalResponseResults = sinon.stub().returns(true);
 			const results = await proposal.send({targets: [endorser]});
 			should.exist(results.responses);
 			if (results.responses && results.responses[0]) {
@@ -242,6 +304,7 @@ describe('Proposal', () => {
 			proposal.build(idx);
 			proposal.sign(idx);
 			sinon.stub(handler, 'endorse').resolves([{response: {status: 200}}]);
+			proposal.compareProposalResponseResults = sinon.stub().returns(true);
 			const results = await proposal.send({handler: handler});
 			should.exist(results.responses);
 			if (results.responses && results.responses[0]) {
@@ -281,70 +344,6 @@ describe('Proposal', () => {
 			}
 		});
 	});
-
-	describe('#compareProposalResponseResults', () => {
-		it('should require a proposalResponses', () => {
-			(() => {
-				proposal.compareProposalResponseResults();
-			}).should.throw('Missing proposalResponses parameter');
-		});
-		it('should require an array of proposalResponses', () => {
-			(() => {
-				proposal.compareProposalResponseResults('string');
-			}).should.throw('proposalResponses must be an array, typeof=string');
-		});
-		it('should require an array of proposalResponses 2', () => {
-			(() => {
-				proposal.compareProposalResponseResults([]);
-			}).should.throw('proposalResponses is empty');
-		});
-		it('if proposalResponses has any error return false', () => {
-			const proposalResponses = [
-				new Error('proposal error')
-			];
-			const results = proposal.compareProposalResponseResults(proposalResponses);
-			results.should.be.false;
-		});
-		it('if only one proposalResponses return true', () => {
-			const proposalResponses = [
-				{payload: TestUtils.createResponsePayload('result1')}
-			];
-			const results = proposal.compareProposalResponseResults(proposalResponses);
-			results.should.be.true;
-		});
-		it('if two same proposalResponses return true', () => {
-			const proposalResponses = [
-				{payload: TestUtils.createResponsePayload('result1')},
-				{payload: TestUtils.createResponsePayload('result1')}
-			];
-			const results = proposal.compareProposalResponseResults(proposalResponses);
-			results.should.be.true;
-		});
-		it('if two not same proposalResponses return false', () => {
-			const proposalResponses = [
-				{payload: TestUtils.createResponsePayload('result1')},
-				{payload: TestUtils.createResponsePayload('result2')}
-			];
-			const results = proposal.compareProposalResponseResults(proposalResponses);
-			results.should.be.false;
-		});
-	});
-
-	describe('#_getProposalResponseResults', () => {
-		const _getProposalResponseResults = Proposal.__get__('_getProposalResponseResults');
-
-		it('should require a proposalResponse', () => {
-			(() => {
-				_getProposalResponseResults();
-			}).should.throw('Missing proposalResponse parameter');
-		});
-		it('should require a proposalResponse.payload', () => {
-			(() => {
-				_getProposalResponseResults({});
-			}).should.throw('Parameter must be a ProposalResponse Object');
-		});
-	});
-
 
 	describe('#verifyProposalResponse', () => {
 		it('should require proposalResponse', () => {

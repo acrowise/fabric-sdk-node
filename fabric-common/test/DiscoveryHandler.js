@@ -34,8 +34,9 @@ describe('DiscoveryHandler', () => {
 	const tmpSetDelete = Set.prototype.delete;
 
 	let peer11, peer12, peer21, peer22, peer31, peer32, peer33;
+	let orderer1, orderer2, orderer3;
 
-	// const pem = '-----BEGIN CERTIFICATE-----    -----END CERTIFICATE-----\n';
+	const pem = '-----BEGIN CERTIFICATE-----    -----END CERTIFICATE-----\n';
 	const org1 = [
 		'Org1MSP',
 		'peer1.org1.example.com:7001',
@@ -87,8 +88,8 @@ describe('DiscoveryHandler', () => {
 		layouts: [{G0: 1, G1: 1}, {G3: 3, G1: 1}]
 	};
 
-	/*
-	const discovery_plan = {
+
+	const config_results = {
 		msps: {
 			OrdererMSP: {
 				id: 'OrdererMSP',
@@ -128,7 +129,7 @@ describe('DiscoveryHandler', () => {
 			Org2MSP: {endpoints: [{host: 'orderer.org2.example.com', port: 7150, name: 'orderer.org2.example.com'}]},
 			Org3MSP: {endpoints: [{host: 'orderer.org3.example.com', port: 7150, name: 'orderer.org3.example.com'}]}
 		},
-		peersByOrg: {
+		peers_by_org: {
 			Org1MSP: {
 				peers: [
 					{mspid: org1[0], endpoint: org1[1], ledgerHeight, chaincodes, name: org1[1]},
@@ -144,14 +145,81 @@ describe('DiscoveryHandler', () => {
 			Org3MSP: {
 				peers: [
 					{mspid: org3[0], endpoint: org3[1], ledgerHeight, chaincodes, name: org3[1]},
-					{mspid: org3[0], endpoint: org3[2], ledgerHeight, chaincodes, name: org3[2]},
-					{mspid: org3[0], endpoint: org3[3], ledgerHeight, chaincodes, name: org3[3]}
+					{mspid: org3[0], endpoint: org3[2], ledgerHeight: highest, chaincodes, name: org3[2]},
+					{mspid: org3[0], endpoint: org3[3], ledgerHeight: smaller, chaincodes, name: org3[3]}
+				]
+			},
+			Org4MSP: {
+				peers: []
+			},
+		}
+	};
+
+	const organization_plan = JSON.parse(JSON.stringify({
+		plan_id: 'required organizations',
+		groups: {
+			Org1MSP: {
+				peers: [
+					{mspid: org1[0], endpoint: org1[1], ledgerHeight, chaincodes, name: org1[1]},
+					{mspid: org1[0], endpoint: org1[2], ledgerHeight, chaincodes, name: org1[2]}
+				]
+			},
+			Org2MSP: {
+				peers: [
+					{mspid: org2[0], endpoint: org2[1], ledgerHeight, chaincodes, name: org2[1]},
+					{mspid: org2[0], endpoint: org2[2], ledgerHeight, chaincodes, name: org2[2]}
+				]
+			},
+			Org3MSP: {
+				peers: [
+					{mspid: org3[0], endpoint: org3[1], ledgerHeight, chaincodes, name: org3[1]},
+					{mspid: org3[0], endpoint: org3[2], ledgerHeight: highest, chaincodes, name: org3[2]},
+					{mspid: org3[0], endpoint: org3[3], ledgerHeight: smaller, chaincodes, name: org3[3]}
 				]
 			}
 		},
-		endorsement_plan: endorsement_plan
-	};
-	*/
+		layouts: [{Org1MSP: 1, Org2MSP: 1, Org3MSP: 1}]
+	}));
+
+	const organization_plan_one = JSON.parse(JSON.stringify({
+		plan_id: 'required organizations',
+		groups: {
+			Org3MSP: {
+				peers: [
+					{mspid: org3[0], endpoint: org3[1], ledgerHeight, chaincodes, name: org3[1]},
+					{mspid: org3[0], endpoint: org3[2], ledgerHeight: highest, chaincodes, name: org3[2]},
+					{mspid: org3[0], endpoint: org3[3], ledgerHeight: smaller, chaincodes, name: org3[3]}
+				]
+			}
+		},
+		layouts: [{Org3MSP: 1}]
+	}));
+
+	const organization_plan_three = JSON.parse(JSON.stringify({
+		plan_id: 'all organizations',
+		groups: {
+			Org1MSP: {
+				peers: [
+					{mspid: org1[0], endpoint: org1[1], ledgerHeight, chaincodes, name: org1[1]},
+					{mspid: org1[0], endpoint: org1[2], ledgerHeight, chaincodes, name: org1[2]}
+				]
+			},
+			Org2MSP: {
+				peers: [
+					{mspid: org2[0], endpoint: org2[1], ledgerHeight, chaincodes, name: org2[1]},
+					{mspid: org2[0], endpoint: org2[2], ledgerHeight, chaincodes, name: org2[2]}
+				]
+			},
+			Org3MSP: {
+				peers: [
+					{mspid: org3[0], endpoint: org3[1], ledgerHeight, chaincodes, name: org3[1]},
+					{mspid: org3[0], endpoint: org3[2], ledgerHeight: highest, chaincodes, name: org3[2]},
+					{mspid: org3[0], endpoint: org3[3], ledgerHeight: smaller, chaincodes, name: org3[3]}
+				]
+			}
+		},
+		layouts: [{Org1MSP: 1, Org2MSP: 1, Org3MSP: 1}]
+	}));
 
 	const good = {response: {status: 200}};
 	beforeEach(() => {
@@ -173,54 +241,67 @@ describe('DiscoveryHandler', () => {
 		peer11 = client.newEndorser(org1[1], org1[0]);
 		peer11.endpoint = {url: 'grpcs://' + org1[1], addr: org1[1]};
 		peer11.sendProposal = sandbox.stub().resolves(good);
+		peer11.checkConnection = sandbox.stub().resolves(true);
 		peer11.connected = true;
 		channel.addEndorser(peer11);
 		peer12 = client.newEndorser(org1[2], org1[0]);
 		peer12.endpoint = {url: 'grpcs://' + org1[2], addr: org1[2]};
 		peer12.sendProposal = sandbox.stub().resolves(good);
+		peer12.checkConnection = sandbox.stub().resolves(true);
 		peer12.connected = true;
 		channel.addEndorser(peer12);
 
 		peer21 = client.newEndorser(org2[1], org2[0]);
 		peer21.endpoint = {url: 'grpcs://' + org2[1], addr: org2[1]};
 		peer21.sendProposal = sandbox.stub().resolves(good);
+		peer21.checkConnection = sandbox.stub().resolves(true);
 		peer21.connected = true;
 		channel.addEndorser(peer21);
 		peer22 = client.newEndorser(org2[2], org2[0]);
 		peer22.endpoint = {url: 'grpcs://' + org2[2], addr: org2[2]};
 		peer22.sendProposal = sandbox.stub().resolves(good);
+		peer22.checkConnection = sandbox.stub().resolves(true);
 		peer22.connected = true;
 		channel.addEndorser(peer22);
 
 		peer31 = client.newEndorser(org3[1], org3[0]);
 		peer31.endpoint = {url: 'grpcs://' + org3[1], addr: org3[1]};
 		peer31.sendProposal = sandbox.stub().resolves(good);
+		peer31.checkConnection = sandbox.stub().resolves(true);
 		peer31.connected = true;
 		channel.addEndorser(peer31);
 		peer32 = client.newEndorser(org3[2], org3[0]);
 		peer32.endpoint = {url: 'grpcs://' + org3[2], addr: org3[2]};
 		peer32.sendProposal = sandbox.stub().resolves(good);
+		peer32.checkConnection = sandbox.stub().resolves(true);
 		peer32.connected = true;
 		channel.addEndorser(peer32);
 		peer33 = client.newEndorser(org3[3], org3[0]);
 		peer33.endpoint = {url: 'grpcs://' + org3[3], addr: org3[3]};
 		peer33.sendProposal = sandbox.stub().resolves(good);
+		peer33.checkConnection = sandbox.stub().resolves(true);
 		peer33.connected = true;
 		channel.addEndorser(peer33);
 
-		const orderer1 = client.newCommitter('orderer1', 'msp1');
+		orderer1 = client.newCommitter('orderer1', 'msp1');
 		orderer1.sendBroadcast = sandbox.stub().resolves({status: 'SUCCESS'});
+		orderer1.checkConnection = sandbox.stub().resolves(true);
 		orderer1.connected = true;
+		orderer1.endpoint = {url: 'grpc://orderer1.com'};
 		channel.addCommitter(orderer1);
 
-		const orderer2 = client.newCommitter('orderer2', 'msp2');
+		orderer2 = client.newCommitter('orderer2', 'msp2');
 		orderer2.sendBroadcast = sandbox.stub().resolves({status: 'SUCCESS'});
+		orderer2.checkConnection = sandbox.stub().resolves(true);
 		orderer2.connected = true;
+		orderer2.endpoint = {url: 'grpc://orderer2.com'};
 		channel.addCommitter(orderer2);
 
-		const orderer3 = client.newCommitter('orderer3', 'msp1');
+		orderer3 = client.newCommitter('orderer3', 'msp1');
 		orderer3.sendBroadcast = sandbox.stub().resolves({status: 'SUCCESS'});
+		orderer3.checkConnection = sandbox.stub().resolves(true);
 		orderer3.connected = true;
+		orderer3.endpoint = {url: 'grpc://orderer3.com'};
 		channel.addCommitter(orderer3);
 
 		discovery = channel.newDiscoveryService('mydiscovery');
@@ -246,7 +327,7 @@ describe('DiscoveryHandler', () => {
 		});
 		it('should create and have these settings', () => {
 			const dh = new DiscoveryHandler('discovery');
-			dh.discovery.should.equal('discovery');
+			dh.discoveryService.should.equal('discovery');
 		});
 	});
 
@@ -292,34 +373,60 @@ describe('DiscoveryHandler', () => {
 		it('should reject if orderers are missing', async () => {
 			await discoveryHandler.commit('signedEnvelope', {mspid: 'msp3'}).should.be.rejectedWith(/No committers assigned to the channel/);
 		});
-		it('should run with orderers assigned by mspid', async () => {
-			const results = await discoveryHandler.commit('signedEnvelope', {mspid: 'msp1', requestTimeout: 2000});
-			results.status.should.equal('SUCCESS');
-		});
-		it('should run with orderers assigned', async () => {
+		it('should run', async () => {
+			discoveryHandler._commitSend = sandbox.stub().resolves({error: undefined, commit: {status:'SUCCESS'}});
 			const results = await discoveryHandler.commit('signedEnvelope');
 			results.status.should.equal('SUCCESS');
 		});
-		it('should run with orderers assigned', async () => {
-			const results = await discoveryHandler.commit('signedEnvelope');
-			results.status.should.equal('SUCCESS');
+		it('should reject', async () => {
+			discoveryHandler._commitSend = sandbox.stub().resolves({error:new Error('FAILED with Error')});
+			await discoveryHandler.commit('signedEnvelope').should.be.rejectedWith('FAILED with Error');
+		});
+	});
+
+	//	async _commitSend(committers, signedEnvelope, timeout, reconnect) {
+
+	describe('#_commitSend', () => {
+		it('should run with some bad orderers assigned', async () => {
+			orderer1.checkConnection = sandbox.stub().resolves(false);
+			orderer2.checkConnection = sandbox.stub().resolves(false);
+			const results = await discoveryHandler._commitSend(channel.getCommitters(), 'signedEnvelope', 2000, false);
+			results.commit.status.should.equal('SUCCESS');
 		});
 		it('should reject orderer returns missing results', async () => {
 			channel.removeCommitter(channel.getCommitter('orderer2'));
 			channel.removeCommitter(channel.getCommitter('orderer3'));
 			channel.getCommitter('orderer1').sendBroadcast = sandbox.stub().resolves();
-			await discoveryHandler.commit('signedEnvelope')
-				.should.be.rejectedWith(/Failed to send transaction to the committer/);
+			const results = await discoveryHandler._commitSend(channel.getCommitters(), 'signedEnvelope', 2000, false);
+			results.error.message.should.equal('Failed to receive committer status');
 		});
 		it('should reject when status is not correct', async () => {
-			channel.getCommitter('orderer2').sendBroadcast = sandbox.stub().resolves({status: 'FAILED'});
-			await discoveryHandler.commit('signedEnvelope', {mspid: 'msp2'})
-				.should.be.rejectedWith(/Failed to send transaction successfully to the committer status:FAILED/);
+			channel.removeCommitter(channel.getCommitter('orderer2'));
+			channel.removeCommitter(channel.getCommitter('orderer3'));
+			channel.getCommitter('orderer1').sendBroadcast = sandbox.stub().resolves({status: 'FAILED'});
+			const results = await discoveryHandler._commitSend(channel.getCommitters(), 'signedEnvelope', 2000, false);
+			results.error.message.should.equal('Failed to send transaction successfully to the committer. status:FAILED');
 		});
 		it('should reject when orderer returns an error', async () => {
+			channel.removeCommitter(channel.getCommitter('orderer1'));
+			channel.removeCommitter(channel.getCommitter('orderer3'));
 			channel.getCommitter('orderer2').sendBroadcast = sandbox.stub().rejects(new Error('FAILED with Error'));
-			await discoveryHandler.commit('signedEnvelope', {mspid: 'msp2'})
-				.should.be.rejectedWith(/FAILED with Error/);
+			const results = await discoveryHandler._commitSend(channel.getCommitters(), 'signedEnvelope', 2000, false);
+			results.error.message.should.equal('FAILED with Error');
+		});
+		it('should reject when all orderers are not connected', async () => {
+			orderer1.checkConnection = sandbox.stub().resolves(false);
+			orderer2.checkConnection = sandbox.stub().resolves(false);
+			orderer3.checkConnection = sandbox.stub().resolves(false);
+			const results = await discoveryHandler._commitSend(channel.getCommitters(), 'signedEnvelope', 2000, false);
+			results.error.message.should.equal('Failed, committer orderer3 is not connected');
+		});
+		it('should reject when all orderers are not connected and using reconnect', async () => {
+			orderer1.checkConnection = sandbox.stub().resolves(false);
+			orderer2.checkConnection = sandbox.stub().resolves(false);
+			orderer3.checkConnection = sandbox.stub().resolves(false);
+			const results = await discoveryHandler._commitSend(channel.getCommitters(), 'signedEnvelope', 2000, true);
+			results.error.message.should.equal('Failed, not able to reconnect to committer orderer3');
 		});
 	});
 
@@ -336,6 +443,14 @@ describe('DiscoveryHandler', () => {
 			discoveryHandler._endorse = sandbox.stub().resolves('DONE');
 			const results = await discoveryHandler.endorse('signedProposal', {requestTimeout: 2000});
 			results.should.equal('DONE');
+		});
+		it('should run ok with required orgs', async () => {
+			discovery.getDiscoveryResults = sandbox.stub().resolves(config_results);
+			discoveryHandler._endorse = sandbox.stub().resolves('DONE');
+			const results = await discoveryHandler.endorse('signedProposal', {requiredOrgs: ['Org1MSP', 'Org2MSP', 'Org3MSP'], sort: 'check'});
+			results.should.equal('DONE');
+			sinon.assert.calledWith(discoveryHandler._endorse, organization_plan, {sort: 'check', preferredHeightGap: undefined});
+
 		});
 	});
 
@@ -355,6 +470,7 @@ describe('DiscoveryHandler', () => {
 			await discoveryHandler._endorse({}, {sort: 'unknown'}, 'proposal').should.be.rejectedWith(/sort parameter is not valid/);
 		});
 		it('should run ok', async () => {
+			discoveryHandler.compareProposalResponseResults = sinon.stub().returns(true);
 			discovery.getDiscoveryResults = sandbox.stub().resolves({endorsement_plan: {something: 'plan a'}});
 			discoveryHandler._modify_groups = sinon.stub();
 			discoveryHandler._getRandom = sinon.stub().returns([{}]);
@@ -365,7 +481,20 @@ describe('DiscoveryHandler', () => {
 			const results = await discoveryHandler._endorse({}, {preferredHeightGap: 0}, 'proposal');
 			results.should.equal('endorsements');
 		});
-		it('should run ok', async () => {
+		it('should run - show failed due to endorsement do not match', async () => {
+			discoveryHandler.compareProposalResponseResults = sinon.stub().returns(false);
+			discovery.getDiscoveryResults = sandbox.stub().resolves({endorsement_plan: {something: 'plan a'}});
+			discoveryHandler._modify_groups = sinon.stub();
+			discoveryHandler._getRandom = sinon.stub().returns([{}]);
+			discoveryHandler._endorse_layout = sandbox.stub().resolves({
+				success: true,
+				endorsements: 'endorsements'
+			});
+			const results = await discoveryHandler._endorse({}, {sort: 'ledgerHeight'}, 'proposal');
+			results[0].message.should.equal('Peer endorsements do not match');
+			results[0].endorsements[0].should.equal('endorsements');
+		});
+		it('should run - show failed', async () => {
 			discovery.getDiscoveryResults = sandbox.stub().resolves({endorsement_plan: {something: 'plan a'}});
 			discoveryHandler._modify_groups = sinon.stub();
 			discoveryHandler._getRandom = sinon.stub().returns([{}]);
@@ -409,7 +538,7 @@ describe('DiscoveryHandler', () => {
 			const results = await discoveryHandler._endorse({}, {}, 'proposal');
 			results[0].endorsements[0].should.equal('failed-endorsements');
 			const m = new Map();
-			sinon.assert.calledWith(discoveryHandler._modify_groups, m, m, m, m, m, m, null, 'ledgerHeight', {endorsements: {}, layouts: [{}]});
+			sinon.assert.calledWith(discoveryHandler._modify_groups, m, m, m, m, m, m, Long.fromInt(1), 'ledgerHeight', {endorsements: {}, layouts: [{}]});
 		});
 	});
 
@@ -492,6 +621,39 @@ describe('DiscoveryHandler', () => {
 		});
 	});
 
+	describe('#_buildRequiredOrgPlan', () => {
+		it('should run ok with all', () => {
+			const results = discoveryHandler._buildRequiredOrgPlan(config_results.peers_by_org, ['Org1MSP', 'Org2MSP', 'Org3MSP']);
+			results.should.deep.equal(organization_plan);
+		});
+		it('should run ok with one', () => {
+			const results = discoveryHandler._buildRequiredOrgPlan(config_results.peers_by_org, ['Org3MSP']);
+			results.should.deep.equal(organization_plan_one);
+		});
+		it('should throw for one missing with no peers', () => {
+			(() => {
+				discoveryHandler._buildRequiredOrgPlan(config_results.peers_by_org, ['Org4MSP']);
+			}).should.throw('The discovery service did not find any peers active for Org4MSP organizations');
+		});
+		it('should throw for two missing when not included in list', () => {
+			(() => {
+				discoveryHandler._buildRequiredOrgPlan(config_results.peers_by_org, ['Org5MSP', 'Org6MSP']);
+			}).should.throw('The discovery service did not find any peers active for Org5MSP,Org6MSP organizations');
+		});
+	});
+
+	describe('#_buildAllOrgPlan', () => {
+		it('should run ok with all', () => {
+			const results = discoveryHandler._buildAllOrgPlan(config_results.peers_by_org);
+			results.should.deep.equal(organization_plan_three);
+		});
+		it('should throw for no peers', () => {
+			(() => {
+				discoveryHandler._buildAllOrgPlan({Org4MSP: {peers: []}});
+			}).should.throw('The discovery service did not find any peers active');
+		});
+	});
+
 	describe('#_build_endorse_group_member', () => {
 		it('should run ok', async () => {
 			endorsement_plan.endorsements = {};
@@ -506,6 +668,23 @@ describe('DiscoveryHandler', () => {
 			);
 			results.response.status.should.equal(200);
 			sinon.assert.calledWith(FakeLogger.debug, '%s - start', '_build_endorse_group_member >> G0:0');
+		});
+		it('should run - show reconnect error', async () => {
+			endorsement_plan.endorsements = {};
+			peer11.checkConnection.resolves(false);
+			peer12.checkConnection.resolves(false);
+			// TEST CALL
+			const results = await discoveryHandler._build_endorse_group_member(
+				endorsement_plan, // endorsement plan
+				endorsement_plan.groups.G0, // group
+				'proposal', // proposal
+				2000, // timeout
+				0, // endorser_process_index
+				'G0' // group name
+			);
+			results.message.should.equal('Peer peer2.org1.example.com:7002 is not connected');
+			sinon.assert.notCalled(peer11.sendProposal);
+			sinon.assert.notCalled(peer12.sendProposal);
 		});
 		it('should run ok and return error when endorser rejects', async () => {
 			endorsement_plan.endorsements = {};
@@ -627,21 +806,6 @@ describe('DiscoveryHandler', () => {
 			should.equal(plan.groups.G0.peers.length, 3);
 			sinon.assert.calledWith(FakeLogger.debug, '%s - start');
 		});
-		it('should run ok with no ledgerHeight_gap', async () => {
-			discoveryHandler._modify_groups(
-				new Map(), // required
-				new Map(), // preferred
-				new Map(), // ignored
-				new Map(), // required_orgs
-				new Map(), // preferred_orgs
-				new Map(), // ignored_orgs
-				null, // preferred_height_gap
-				'unknown', // sort
-				plan // endorsement_plan
-			);
-			should.equal(plan.groups.G0.peers.length, 3);
-			sinon.assert.calledWith(FakeLogger.debug, '%s - start');
-		});
 		it('should convert ledgerHeight', async () => {
 			discoveryHandler._modify_groups(
 				new Map(), // required
@@ -650,7 +814,7 @@ describe('DiscoveryHandler', () => {
 				new Map(), // required_orgs
 				new Map(), // preferred_orgs
 				new Map(), // ignored_orgs
-				null, // preferred_height_gap
+				new Long(1), // preferred_height_gap
 				'ledgerHeight', // sort
 				plan // endorsement_plan
 			);
@@ -784,19 +948,20 @@ describe('DiscoveryHandler', () => {
 	});
 
 	describe('#_splitList', () => {
+		const peer1 = {name: 'peer1', mspid: 'msp1', ledgerHeight: Long.fromValue(25)};
+		const peer2 = {name: 'peer2', mspid: 'msp1', ledgerHeight: Long.fromValue(20)};
+		const peer3 = {name: 'peer3', mspid: 'msp1', ledgerHeight: Long.fromValue(15)};
+		const peer4 = {name: 'peer4', mspid: 'msp3', ledgerHeight: Long.fromValue(10)};
+		const peer5 = {name: 'peer5', mspid: 'msp2', ledgerHeight: Long.fromValue(20)};
+		const peer6 = {name: 'peer6', mspid: 'msp2', ledgerHeight: Long.fromValue(15)};
+		const peer7 = {name: 'peer7', mspid: 'msp3', ledgerHeight: Long.fromValue(25)};
+		const peer8 = {name: 'peer8', mspid: 'msp4', ledgerHeight: Long.fromValue(20)};
+		const peer9 = {name: 'peer9', mspid: 'msp4', ledgerHeight: Long.fromValue(15)};
+		const peerA = {name: 'peer10', mspid: 'msp5'};
+		const peerB = {name: 'peer11', mspid: 'msp5'};
+
 		it('should run all', async () => {
-			const sorted_list = [
-				{name: 'peer1', mspid: 'msp1', ledgerHeight: Long.fromValue(25)},
-				{name: 'peer2', mspid: 'msp1', ledgerHeight: Long.fromValue(20)},
-				{name: 'peer3', mspid: 'msp1', ledgerHeight: Long.fromValue(15)},
-				{name: 'peer4', mspid: 'msp3', ledgerHeight: Long.fromValue(10)},
-				{name: 'peer5', mspid: 'msp2', ledgerHeight: Long.fromValue(20)},
-				{name: 'peer6', mspid: 'msp2', ledgerHeight: Long.fromValue(15)},
-				{name: 'peer7', mspid: 'msp3', ledgerHeight: Long.fromValue(25)},
-				{name: 'peer8', mspid: 'msp4', ledgerHeight: Long.fromValue(20)},
-				{name: 'peer9', mspid: 'msp4', ledgerHeight: Long.fromValue(15)},
-				{name: 'peer10', mspid: 'msp5'}
-			];
+			const sorted_list = [peer1, peer2, peer3, peer4, peer5, peer6, peer7, peer8, peer9, peerA];
 			const preferred_endorsers = discoveryHandler._create_map([
 				'peer10'
 			]);
@@ -805,6 +970,8 @@ describe('DiscoveryHandler', () => {
 			]);
 			const preferred_height_gap = Long.fromValue(5);
 			const highest_p = Long.fromValue(25);
+			const priority_list = [peer1, peer2, peer5, peer6, peer7, peer8, peerA];
+			discoveryHandler._getRandom = sinon.stub().returns(priority_list);
 
 			// TEST CALL
 			const results = discoveryHandler._splitList(
@@ -814,31 +981,14 @@ describe('DiscoveryHandler', () => {
 				highest_p,
 				sorted_list
 			);
-			results.priority[0].name.should.be.equal('peer1');
-			results.priority[1].name.should.be.equal('peer2');
+			sinon.assert.calledWith(discoveryHandler._getRandom, priority_list);
 			results.non_priority[0].name.should.be.equal('peer3');
 			results.non_priority[1].name.should.be.equal('peer4');
-			results.priority[2].name.should.be.equal('peer5');
-			results.priority[3].name.should.be.equal('peer6');
-			results.priority[4].name.should.be.equal('peer7');
-			results.priority[5].name.should.be.equal('peer8');
 			results.non_priority[2].name.should.be.equal('peer9');
-			results.priority[6].name.should.be.equal('peer10');
+
 		});
 		it('should run with no highest', async () => {
-			const sorted_list = [
-				{name: 'peer1', mspid: 'msp1', ledgerHeight: Long.fromValue(25)},
-				{name: 'peer2', mspid: 'msp1', ledgerHeight: Long.fromValue(20)},
-				{name: 'peer3', mspid: 'msp1', ledgerHeight: Long.fromValue(15)},
-				{name: 'peer4', mspid: 'msp3', ledgerHeight: Long.fromValue(10)},
-				{name: 'peer5', mspid: 'msp2', ledgerHeight: Long.fromValue(20)},
-				{name: 'peer6', mspid: 'msp2', ledgerHeight: Long.fromValue(15)},
-				{name: 'peer7', mspid: 'msp3', ledgerHeight: Long.fromValue(25)},
-				{name: 'peer8', mspid: 'msp4', ledgerHeight: Long.fromValue(20)},
-				{name: 'peer9', mspid: 'msp4', ledgerHeight: Long.fromValue(15)},
-				{name: 'peer10', mspid: 'msp5'},
-				{name: 'peer11', mspid: 'msp5'}
-			];
+			const sorted_list = [peer1, peer2, peer3, peer4, peer5, peer6, peer7, peer8, peer9, peerA, peerB];
 			const preferred_endorsers = discoveryHandler._create_map([
 				'peer10',
 				'peer3'
@@ -847,51 +997,9 @@ describe('DiscoveryHandler', () => {
 				'msp2'
 			]);
 			const preferred_height_gap = Long.fromValue(0);
-			const highest_p = Long.fromValue(25);
-
-			// TEST CALL
-			const results = discoveryHandler._splitList(
-				preferred_endorsers,
-				preferred_orgs,
-				preferred_height_gap,
-				highest_p,
-				sorted_list
-			);
-			results.priority[0].name.should.be.equal('peer1');
-			results.non_priority[0].name.should.be.equal('peer2');
-			results.priority[1].name.should.be.equal('peer3');
-			results.non_priority[1].name.should.be.equal('peer4');
-			results.priority[2].name.should.be.equal('peer5');
-			results.priority[3].name.should.be.equal('peer6');
-			results.priority[4].name.should.be.equal('peer7');
-			results.non_priority[2].name.should.be.equal('peer8');
-			results.non_priority[3].name.should.be.equal('peer9');
-			results.priority[5].name.should.be.equal('peer10');
-			results.non_priority[4].name.should.be.equal('peer11');
-		});
-		it('should run with no ledgerHeight', async () => {
-			const sorted_list = [
-				{name: 'peer1', mspid: 'msp1', ledgerHeight: Long.fromValue(25)},
-				{name: 'peer2', mspid: 'msp1', ledgerHeight: Long.fromValue(20)},
-				{name: 'peer3', mspid: 'msp1', ledgerHeight: Long.fromValue(15)},
-				{name: 'peer4', mspid: 'msp3', ledgerHeight: Long.fromValue(10)},
-				{name: 'peer5', mspid: 'msp2', ledgerHeight: Long.fromValue(20)},
-				{name: 'peer6', mspid: 'msp2', ledgerHeight: Long.fromValue(15)},
-				{name: 'peer7', mspid: 'msp3', ledgerHeight: Long.fromValue(25)},
-				{name: 'peer8', mspid: 'msp4', ledgerHeight: Long.fromValue(20)},
-				{name: 'peer9', mspid: 'msp4', ledgerHeight: Long.fromValue(15)},
-				{name: 'peer10', mspid: 'msp5'},
-				{name: 'peer11', mspid: 'msp5'}
-			];
-			const preferred_endorsers = discoveryHandler._create_map([
-				'peer10',
-				'peer3'
-			]);
-			const preferred_orgs = discoveryHandler._create_map([
-				'msp2'
-			]);
-			const preferred_height_gap = null;
 			const highest_p = null;
+			const priority_list = [peer3, peer5, peer6, peerA];
+			discoveryHandler._getRandom = sinon.stub().returns(priority_list);
 
 			// TEST CALL
 			const results = discoveryHandler._splitList(
@@ -901,16 +1009,13 @@ describe('DiscoveryHandler', () => {
 				highest_p,
 				sorted_list
 			);
+			sinon.assert.calledWith(discoveryHandler._getRandom, priority_list);
 			results.non_priority[0].name.should.be.equal('peer1');
 			results.non_priority[1].name.should.be.equal('peer2');
-			results.priority[0].name.should.be.equal('peer3');
 			results.non_priority[2].name.should.be.equal('peer4');
-			results.priority[1].name.should.be.equal('peer5');
-			results.priority[2].name.should.be.equal('peer6');
 			results.non_priority[3].name.should.be.equal('peer7');
 			results.non_priority[4].name.should.be.equal('peer8');
 			results.non_priority[5].name.should.be.equal('peer9');
-			results.priority[3].name.should.be.equal('peer10');
 			results.non_priority[6].name.should.be.equal('peer11');
 		});
 	});
@@ -967,6 +1072,67 @@ describe('DiscoveryHandler', () => {
 				}
 				should.equal(found, true, `Item ${item} was not found`);
 			}
+		});
+	});
+
+	describe('#compareProposalResponseResults', () => {
+		it('should require a proposalResponses', () => {
+			(() => {
+				discoveryHandler.compareProposalResponseResults();
+			}).should.throw('Missing proposalResponses parameter');
+		});
+		it('should require an array of proposalResponses', () => {
+			(() => {
+				discoveryHandler.compareProposalResponseResults('string');
+			}).should.throw('proposalResponses must be an array, typeof=string');
+		});
+		it('should require an array of proposalResponses 2', () => {
+			(() => {
+				discoveryHandler.compareProposalResponseResults([]);
+			}).should.throw('proposalResponses is empty');
+		});
+		it('if proposalResponses has any error return false', () => {
+			const proposalResponses = [
+				new Error('proposal error')
+			];
+			const results = discoveryHandler.compareProposalResponseResults(proposalResponses);
+			results.should.be.false;
+		});
+		it('if only one proposalResponses return true', () => {
+			const proposalResponses = [
+				{payload: TestUtils.createResponsePayload('result1')}
+			];
+			const results = discoveryHandler.compareProposalResponseResults(proposalResponses);
+			results.should.be.true;
+		});
+		it('if two same proposalResponses return true', () => {
+			const proposalResponses = [
+				{payload: TestUtils.createResponsePayload('result1')},
+				{payload: TestUtils.createResponsePayload('result1')}
+			];
+			const results = discoveryHandler.compareProposalResponseResults(proposalResponses);
+			results.should.be.true;
+		});
+		it('if two not same proposalResponses return false', () => {
+			const proposalResponses = [
+				{payload: TestUtils.createResponsePayload('result1')},
+				{payload: TestUtils.createResponsePayload('result2')}
+			];
+			const results = discoveryHandler.compareProposalResponseResults(proposalResponses);
+			results.should.be.false;
+		});
+	});
+
+	describe('#_getProposalResponseResults', () => {
+		it('should require a proposalResponse', () => {
+			(() => {
+				discoveryHandler._getProposalResponseResults();
+			}).should.throw('Missing proposalResponse parameter');
+		});
+		it('should require a proposalResponse.payload', () => {
+			(() => {
+				discoveryHandler._getProposalResponseResults({});
+			}).should.throw('Parameter must be a ProposalResponse Object');
 		});
 	});
 });

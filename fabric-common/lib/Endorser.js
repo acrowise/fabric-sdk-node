@@ -44,6 +44,66 @@ class Endorser extends ServiceEndpoint {
 
 		this.type = TYPE;
 		this.serviceClass = fabproto6.protos.Endorser;
+
+		// initialized with legacy system chaincodes that all peers have that do
+		// not have endorsement policies and therefore discovery will not show
+		this.chaincodes = [];
+		this.chaincodes = this.chaincodes.concat(module.exports.SYSTEMCHAINCODES);
+		// if discovered chaincodes
+		this.discovered = false;
+	}
+
+	/**
+	 * Add a chaincode name or ID to this Peer. This will aid in
+	 * determining if this peer should be used to endorse.
+	 *
+	 * This will primarily be used by the {@link DiscoveryService} when
+	 * adding peers to a channel based on the discovery results
+	 *
+	 * @param {String} chaincodeName
+	 */
+	addChaincode(chaincodeName) {
+		const method = `addChaincode[${this.name}]`;
+
+		if (chaincodeName) {
+			if (this.hasChaincode(chaincodeName, false)) {
+				logger.debug(`${method} - chaincode already exist on this endorser - ${chaincodeName}`);
+			} else {
+				this.chaincodes.push(chaincodeName);
+				logger.debug(`${method} - chaincode added to this endorser - ${chaincodeName}`);
+			}
+		}
+
+		return this;
+	}
+
+	/**
+	 * Check if this peer has the chaincode on it's list.
+	 * If the list is empty then this peer has not been told of it's chaincodes
+	 * and therefore might be running the chaincode in question.
+	 * @param {String} chaincodeName
+	 * @param {boolean} [maybe] Optional, default true, if noMaybe is true then
+	 * this method will return true when the peer does not have any chaincodes on
+	 * the list.
+	 */
+	hasChaincode(chaincodeName, maybe = true) {
+		const method = `hasChaincode[${this.name}]`;
+
+		if (chaincodeName) {
+			for (const chaincode of this.chaincodes) {
+				if (chaincodeName === chaincode) {
+					logger.debug(`${method} - chaincode found on this endorser discovered chaincodes - ${chaincodeName}`);
+					return true;
+				}
+			}
+			if (!this.discovered && maybe) {
+				logger.debug(`${method} - peer has not been checked by discovery for chaincodes - ${chaincodeName} might be installed`);
+				return true;
+			}
+		}
+
+		logger.debug(`${method} - chaincode not found on this endorser - ${chaincodeName}`);
+		return false;
 	}
 
 	/**
@@ -61,9 +121,11 @@ class Endorser extends ServiceEndpoint {
 	 */
 	sendProposal(signedProposal, timeout) {
 		const method = `sendProposal[${this.name}]`;
-		logger.debug(`${method} - Start ----${this.name} ${this.endpoint.url} timeout:${timeout}`);
+		logger.debug(`${method} - start -- ${this.name} ${this.endpoint.url} timeout:${timeout}`);
 
 		return new Promise((resolve, reject) => {
+			logger.debug('%s - running promise', method);
+
 			if (!signedProposal) {
 				checkParameter('signedProposal');
 			}
@@ -71,20 +133,14 @@ class Endorser extends ServiceEndpoint {
 				throw Error(`Broadcast Client ${this.name} ${this.endpoint.url} is not connected`);
 			}
 
-			logger.debug('%s - %j', method, signedProposal);
-
-
-
-
 			let rto = this.options.requestTimeout;
 			if (typeof timeout === 'number') {
 				rto = timeout;
 			}
 			const send_timeout = setTimeout(() => {
 				clearTimeout(send_timeout);
-				logger.error(`${method} - ${this.name} timed out after:${rto}`);
+				logger.error(`${method} - ${this.name} timed out after: ${rto}`);
 				const return_error = new Error('REQUEST TIMEOUT');
-				this.getCharacteristics(return_error);
 				return reject(return_error);
 			}, rto);
 
@@ -93,35 +149,36 @@ class Endorser extends ServiceEndpoint {
 				if (err) {
 					logger.error(`${method} - Received error response from: ${this.endpoint.url} error: ${err}`);
 					if (err instanceof Error) {
-						this.getCharacteristics(err);
 						reject(err);
 					} else {
 						const out_error = new Error(err);
-						this.getCharacteristics(out_error);
 						reject(out_error);
 					}
 				} else {
 					if (proposalResponse) {
 						logger.debug(`${method} - Received proposal response from peer "${this.endpoint.url}": status - ${proposalResponse.response && proposalResponse.response.status}`);
 						if (proposalResponse.response && proposalResponse.response.status) {
-							this.getCharacteristics(proposalResponse);
 							resolve(proposalResponse);
 						} else {
 							const return_error = new Error(`GRPC service failed to get a proper response from the peer "${this.endpoint.url}".`);
-							this.getCharacteristics(return_error);
-							logger.error(`${method} - rejecting with:${return_error}`);
 							reject(return_error);
 						}
 					} else {
 						const return_error = new Error(`GRPC service got a null or undefined response from the peer "${this.endpoint.url}".`);
-						this.getCharacteristics(return_error);
-						logger.error(`${method} - rejecting with:${return_error}`);
 						reject(return_error);
 					}
 				}
 			});
-		});
+		}).then(
+			result => this.getCharacteristics(result),
+			error => {
+				this.getCharacteristics(error);
+				logger.error(`${method} - rejecting with: ${error}`);
+				throw error;
+			}
+		);
 	}
 }
 
 module.exports = Endorser;
+module.exports.SYSTEMCHAINCODES = ['cscc', 'qscc', 'lscc', 'vscc', 'escc'];

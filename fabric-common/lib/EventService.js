@@ -89,8 +89,11 @@ class EventService extends ServiceAction {
 		// will be set during the .build call
 		this.blockType = FILTERED_BLOCK;
 		this.replay = false;
+		this.startSpecified = false;
 
 		this.myNumber = count++;
+
+		this.inUse = false;
 	}
 
 	/**
@@ -113,13 +116,13 @@ class EventService extends ServiceAction {
 		}
 
 		for (const eventer of targets) {
-			if (eventer.connected || eventer.isConnectable()) {
-				logger.debug('%s - target is or could be connected %s', method, eventer.name);
+			if (eventer.isConnectable()) {
+				logger.debug('%s - target is connectable %s', method, eventer.name);
 			} else {
 				throw Error(`Eventer ${eventer.name} is not connectable`);
 			}
 		}
-		// must be all targets are connected
+		// must be all targets are connectable
 		this.targets = targets;
 
 		return this;
@@ -168,7 +171,9 @@ class EventService extends ServiceAction {
 		} else {
 			logger.debug('%s - no current eventer - not shutting down stream', method);
 		}
+
 		this._closeRunning = false;
+		this.inUse = false;
 
 		logger.debug('%s - end', method);
 	}
@@ -222,6 +227,7 @@ class EventService extends ServiceAction {
 		const method = `build[${this.name}] - #${this.myNumber}`;
 		logger.debug(`${method} - start`);
 
+		this.inUse = true;
 		const {startBlock, endBlock, blockType = FILTERED_BLOCK} = options;
 		this.startBlock = this._checkBlockNum(startBlock);
 		this.endBlock = this._checkBlockNum(endBlock);
@@ -266,6 +272,7 @@ class EventService extends ServiceAction {
 				number: this.startBlock
 			});
 			this.replay = true;
+			this.startSpecified = true;
 		}
 
 		// build stop proto
@@ -356,10 +363,6 @@ class EventService extends ServiceAction {
 					logger.debug('%s - target has a stream, is already listening %s', method, target.toString());
 					startError = Error(`Event service ${target.name} is currently listening`);
 				} else {
-					if (target.isConnectable()) {
-						logger.debug('%s - target needs to connect %s', method, target.toString());
-						await target.connect(); // target endpoint has been previously assigned, but not connected yet
-					}
 					const isConnected = await target.checkConnection();
 					if (!isConnected) {
 						startError = Error(`Event service ${target.name} is not connected`);
@@ -409,11 +412,21 @@ class EventService extends ServiceAction {
 
 			logger.debug('%s - create stream setup timeout', method);
 			const connectionSetupTimeout = setTimeout(() => {
-				logger.error(`EventService[${this.name}] timed out after:${requestTimeout}`);
-				reject(Error('Event service timed out - Unable to start listening'));
+				// this service may be waiting for a start block that has not happened
+				if (this.startSpecified) {
+					logger.debug(`EventService[${this.name}] timed out after:${requestTimeout}`);
+					logger.debug(`EventService[${this.name}] not stopping service, wait indefinitely`);
+					// resolve the promise as if we did get a good response from the peer, since we did
+					// not get an "end" or "error" back indicating that the request was invalid
+					// application should have a timer just in case this peer never gets this block
+					resolve(eventer);
+				} else {
+					logger.error(`EventService[${this.name}] timed out after:${requestTimeout}`);
+					reject(Error('Event service timed out - Unable to start listening'));
+				}
+
 			}, requestTimeout);
 
-			logger.debug('%s - create stream based on blockType', method, this.blockType);
 			eventer.setStreamByType(this.blockType);
 
 			// the promise and streams live on and we need
@@ -423,7 +436,7 @@ class EventService extends ServiceAction {
 			const mystreamCount = streamCount++;
 			this.currentStreamNumber = mystreamCount;
 
-			logger.debug('%s - create stream listening callbacks - onData, onEnd, onStatus, onError', method);
+			logger.debug('%s - created stream % based on blockType %s', method, this.currentStreamNumber, this.blockType);
 
 			eventer.stream.on('data', (deliverResponse) => {
 				logger.debug('on.data %s- peer:%s - stream:%s', me, eventer.endpoint.url, mystreamCount);
@@ -598,17 +611,30 @@ class EventService extends ServiceAction {
 	}
 
 	/**
+	 * Use this method to indicate if application has already started using this
+	 * service. The service will have been asked to build the service request
+	 * and will not have commpleted the service startup.
+	 */
+	isInUse() {
+		const method = `isInUse[${this.name}]  - #${this.myNumber}`;
+		logger.debug('%s inUse - %s', method, this.inUse);
+
+		return this.inUse;
+	}
+
+	/**
 	 * Use this method to indicate if this event service has an event endpoint
 	 * {@link Eventer} assigned and the event endpoint has a listening stream
 	 * connected and active.
 	 */
 	isStarted() {
 		const method = `isStarted[${this.name}]  - #${this.myNumber}`;
-		logger.debug('%s - start', method);
 
 		if (this._currentEventer && this._currentEventer.isStreamReady()) {
+			logger.debug('%s - true', method);
 			return true;
 		} else {
+			logger.debug('%s - false', method);
 			return false;
 		}
 	}
